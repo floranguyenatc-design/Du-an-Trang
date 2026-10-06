@@ -1,0 +1,363 @@
+"""Giao diện dòng lệnh: ``python -m hddt <lệnh>``.
+
+Lệnh chính:
+    login       Kiểm tra đăng nhập (tự giải CAPTCHA), in thông tin đơn vị.
+    pull        Kéo danh sách hóa đơn (mua vào / bán ra), tải XML và xuất Excel.
+    excel-gdt   Tải file Excel do GDT xuất sẵn cho khoảng ngày.
+    parse-xml   Đọc thư mục XML đã tải (offline) và xuất Excel.
+    captcha     Lấy một CAPTCHA và in mã giải được (để kiểm tra bộ giải).
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import logging
+import os
+import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import date, datetime, timedelta
+from pathlib import Path
+from typing import Any
+
+from . import __version__
+from .client import DEFAULT_USER_AGENT, FAMILIES, GdtClient, HddtError, InvoiceRef, LoginError
+from .config import Settings, parse_vn_date
+from .export import invoice_row, line_rows, write_workbook
+from .xmlparse import ParsedInvoice, parse_invoice_file, parse_invoice_xml
+
+log = logging.getLogger("hddt")
+
+DIRECTION_CHOICES = {
+    "mua": ["purchase"],
+    "ban": ["sold"],
+    "ca-hai": ["purchase", "sold"],
+    "purchase": ["purchase"],
+    "sold": ["sold"],
+    "both": ["purchase", "sold"],
+}
+
+
+def _setup_logging(verbose: bool, log_file: str | None = None) -> None:
+    handlers: list[logging.Handler] = [logging.StreamHandler(sys.stdout)]
+    if log_file:
+        handlers.append(logging.FileHandler(log_file, encoding="utf-8"))
+    logging.basicConfig(
+        level=logging.DEBUG if verbose else logging.INFO,
+        format="%(asctime)s %(levelname)-5s %(message)s",
+        datefmt="%H:%M:%S",
+        handlers=handlers,
+    )
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
+
+
+def _client(settings: Settings, args: argparse.Namespace) -> GdtClient:
+    username = getattr(args, "user", None) or settings.username
+    password = getattr(args, "password", None) or settings.password
+    token = getattr(args, "token", None) or settings.token
+    return GdtClient(
+        username=username,
+        password=password,
+        token=token,
+        user_agent=settings.user_agent or DEFAULT_USER_AGENT,
+        proxies=settings.proxies(),
+        timeout=settings.timeout,
+        request_interval=settings.request_interval,
+        verify_ssl=settings.verify_ssl,
+    )
+
+
+def _families(args: argparse.Namespace) -> list[str]:
+    fams = list(FAMILIES)
+    if getattr(args, "khong_mtt", False):
+        fams.remove("sco-query")
+    if getattr(args, "chi_mtt", False):
+        fams = ["sco-query"]
+    return fams
+
+
+def _default_dates(args: argparse.Namespace) -> tuple[date, date]:
+    if args.thang:
+        y, m = _parse_month(args.thang)
+        start = date(y, m, 1)
+        end = (start + timedelta(days=32)).replace(day=1) - timedelta(days=1)
+        return start, end
+    if not args.tu_ngay or not args.den_ngay:
+        raise SystemExit("Cần --tu-ngay và --den-ngay (dd/mm/yyyy) hoặc --thang mm/yyyy.")
+    start, end = parse_vn_date(args.tu_ngay), parse_vn_date(args.den_ngay)
+    if start > end:
+        raise SystemExit("--tu-ngay phải nhỏ hơn hoặc bằng --den-ngay.")
+    return start, end
+
+
+def _parse_month(text: str) -> tuple[int, int]:
+    for fmt in ("%m/%Y", "%Y-%m", "%m-%Y"):
+        try:
+            d = datetime.strptime(text.strip(), fmt)
+            return d.year, d.month
+        except ValueError:
+            continue
+    raise SystemExit(f"--thang không hợp lệ: {text!r} (dùng mm/yyyy)")
+
+
+# ----------------------------------------------------------------- commands
+def cmd_login(args: argparse.Namespace, settings: Settings) -> int:
+    client = _client(settings, args)
+    client.login()
+    try:
+        profile = client.get_profile()
+        print("Đăng nhập thành công.")
+        for key in ("name", "tin", "username", "email", "phone"):
+            if profile.get(key):
+                print(f"  {key}: {profile[key]}")
+    except HddtError as exc:
+        print(f"Đăng nhập thành công nhưng không đọc được profile: {exc}")
+    if args.in_token:
+        print("TOKEN:", client.token)
+    return 0
+
+
+def cmd_captcha(args: argparse.Namespace, settings: Settings) -> int:
+    client = _client(settings, args)
+    for _ in range(args.so_lan):
+        key, code, svg = client.get_captcha()
+        print(f"key={key}  giải được: {code or '(không nhận ra)'}")
+        if args.luu:
+            Path(args.luu).mkdir(parents=True, exist_ok=True)
+            (Path(args.luu) / f"captcha_{key[:12] or 'x'}_{code or 'unknown'}.svg").write_text(svg, encoding="utf-8")
+    return 0
+
+
+def cmd_excel_gdt(args: argparse.Namespace, settings: Settings) -> int:
+    client = _client(settings, args)
+    start, end = _default_dates(args)
+    out_dir = Path(args.thu_muc or settings.output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for direction in DIRECTION_CHOICES[args.chieu]:
+        for family in _families(args):
+            ttxly = args.ttxly if args.ttxly is not None else (8 if family == "sco-query" else None)
+            data = client.download_excel(direction, start, end, family=family, ttxly=ttxly)
+            name = f"GDT_{direction}_{family}_{start:%Y%m%d}_{end:%Y%m%d}.xlsx"
+            (out_dir / name).write_bytes(data)
+            print(f"Đã lưu {out_dir / name} ({len(data):,} bytes)")
+    return 0
+
+
+def cmd_pull(args: argparse.Namespace, settings: Settings) -> int:
+    client = _client(settings, args)
+    start, end = _default_dates(args)
+    out_dir = Path(args.thu_muc or settings.output_dir)
+    xml_dir = out_dir / "xml"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    directions = DIRECTION_CHOICES[args.chieu]
+    families = _families(args)
+
+    client.login()
+    log.info("Kéo hóa đơn %s từ %s đến %s (nguồn: %s)", "/".join(directions), f"{start:%d/%m/%Y}", f"{end:%d/%m/%Y}", ", ".join(families))
+
+    refs: list[InvoiceRef] = []
+    errors: list[dict[str, Any]] = []
+    seen: set[tuple[str, ...]] = set()
+    for direction in directions:
+        try:
+            for ref in client.iter_invoices(
+                direction, start, end, families=families, ttxly=args.ttxly, page_size=settings.page_size,
+                on_page=lambda d, f, s, e, p, n: log.info("[DANH SÁCH] %s/%s %s-%s trang %d: +%d", d, f, f"{s:%d/%m}", f"{e:%d/%m/%Y}", p, n),
+            ):
+                key = (ref.direction, ref.family, ref.nbmst, ref.khmshdon, ref.khhdon, ref.shdon)
+                if key in seen:
+                    continue
+                seen.add(key)
+                refs.append(ref)
+        except HddtError as exc:
+            log.error("Lỗi lấy danh sách %s: %s", direction, exc)
+            errors.append(_err(direction, "", None, "Danh sách", str(exc)))
+    log.info("Tổng cộng %d hóa đơn.", len(refs))
+
+    # Lưu danh sách thô (JSON) để đối chiếu / dùng lại.
+    raw_path = out_dir / f"danh_sach_{start:%Y%m%d}_{end:%Y%m%d}.json"
+    raw_path.write_text(json.dumps([r.raw for r in refs], ensure_ascii=False, indent=1), encoding="utf-8")
+
+    parsed_map: dict[int, ParsedInvoice] = {}
+    xml_files: dict[int, str] = {}
+    xml_errors: dict[int, str] = {}
+
+    if not args.khong_xml and refs:
+        xml_dir.mkdir(parents=True, exist_ok=True)
+
+        def work(idx: int, ref: InvoiceRef) -> tuple[int, str | None, ParsedInvoice | None, str]:
+            target_dir = xml_dir / ref.direction
+            target_dir.mkdir(parents=True, exist_ok=True)
+            existing = target_dir / f"{ref.file_stem}.xml"
+            try:
+                if existing.is_file() and not args.tai_lai:
+                    return idx, str(existing), parse_invoice_file(str(existing)), ""
+                files = client.download_xml(ref)
+                xml_path = None
+                parsed = None
+                for name, data in files:
+                    p = target_dir / name
+                    p.write_bytes(data)
+                    if name.endswith(".xml") and xml_path is None:
+                        xml_path = str(p)
+                        try:
+                            parsed = parse_invoice_xml(data)
+                        except Exception as exc:  # noqa: BLE001
+                            return idx, xml_path, None, f"Đọc XML lỗi: {exc}"
+                return idx, xml_path, parsed, ""
+            except HddtError as exc:
+                msg = str(exc)
+                if getattr(exc, "status", None) == 500:
+                    msg = "GDT không có hồ sơ XML cho hóa đơn này (HTTP 500)"
+                return idx, None, None, msg
+            except Exception as exc:  # noqa: BLE001
+                return idx, None, None, f"Lỗi không xác định: {exc}"
+
+        workers = max(1, min(args.luong or settings.xml_workers, 10))
+        done = 0
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = [pool.submit(work, i, r) for i, r in enumerate(refs)]
+            for fut in as_completed(futures):
+                idx, path, parsed, err = fut.result()
+                done += 1
+                if path:
+                    xml_files[idx] = path
+                if parsed:
+                    parsed_map[idx] = parsed
+                if err:
+                    xml_errors[idx] = err
+                    errors.append(_err(refs[idx].direction, refs[idx].family, refs[idx], "Tải XML", err))
+                    log.warning("[XML] %d/%d %s: %s", done, len(refs), refs[idx].label, err)
+                elif done % 10 == 0 or done == len(refs):
+                    log.info("[XML] %d/%d đã tải.", done, len(refs))
+
+    rows = [invoice_row(r, parsed_map.get(i), os.path.relpath(xml_files[i], out_dir) if i in xml_files else "", xml_errors.get(i, "")) for i, r in enumerate(refs)]
+    lines: list[dict[str, Any]] = []
+    for i, r in enumerate(refs):
+        if i in parsed_map:
+            lines.extend(line_rows(r, parsed_map[i]))
+
+    excel_path = Path(args.excel) if args.excel else out_dir / f"HoaDon_{start:%Y%m%d}_{end:%Y%m%d}.xlsx"
+    write_workbook(str(excel_path), rows, lines, errors)
+    log.info("Đã ghi Excel: %s (%d hóa đơn, %d dòng hàng, %d lỗi)", excel_path, len(rows), len(lines), len(errors))
+    print(f"\nXong. Hóa đơn: {len(rows)} | Dòng hàng: {len(lines)} | Lỗi: {len(errors)}")
+    print(f"Excel : {excel_path}")
+    if not args.khong_xml:
+        print(f"XML   : {xml_dir}")
+    return 0 if not errors else 2
+
+
+def cmd_parse_xml(args: argparse.Namespace, settings: Settings) -> int:
+    folder = Path(args.thu_muc_xml)
+    if not folder.is_dir():
+        raise SystemExit(f"Không thấy thư mục {folder}")
+    rows: list[dict[str, Any]] = []
+    lines: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
+    files = sorted(folder.rglob("*.xml"))
+    for path in files:
+        try:
+            parsed = parse_invoice_file(str(path))
+        except Exception as exc:  # noqa: BLE001
+            errors.append({"Chiều": "", "Nguồn": "", "MST người bán": "", "Mẫu số": "", "Ký hiệu": "", "Số HĐ": str(path.name), "Bước": "Đọc XML", "Lỗi": str(exc)})
+            continue
+        direction = "purchase"
+        lowered = str(path).lower()
+        if "sold" in lowered or "ban" in lowered.split(os.sep):
+            direction = "sold"
+        if args.chieu in ("mua", "purchase"):
+            direction = "purchase"
+        elif args.chieu in ("ban", "sold"):
+            direction = "sold"
+        ref = InvoiceRef(
+            direction=direction, family="query", nbmst=parsed.nb_mst, khmshdon=parsed.khmshdon,
+            khhdon=parsed.khhdon, shdon=parsed.shdon, raw={},
+        )
+        rows.append(invoice_row(ref, parsed, str(path), ""))
+        lines.extend(line_rows(ref, parsed))
+    out = Path(args.excel or (folder / "HoaDon_Local.xlsx"))
+    write_workbook(str(out), rows, lines, errors)
+    print(f"Đã đọc {len(files)} file XML -> {out} ({len(rows)} hóa đơn, {len(lines)} dòng hàng, {len(errors)} lỗi)")
+    return 0
+
+
+def _err(direction: str, family: str, ref: InvoiceRef | None, step: str, message: str) -> dict[str, Any]:
+    return {
+        "Chiều": "Mua vào" if direction == "purchase" else ("Bán ra" if direction == "sold" else direction),
+        "Nguồn": family,
+        "MST người bán": ref.nbmst if ref else "",
+        "Mẫu số": ref.khmshdon if ref else "",
+        "Ký hiệu": ref.khhdon if ref else "",
+        "Số HĐ": ref.shdon if ref else "",
+        "Bước": step,
+        "Lỗi": message,
+    }
+
+
+# ------------------------------------------------------------------- parser
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="hddt", description="Kéo hóa đơn điện tử từ hệ thống của Cơ quan Thuế (hoadondientu.gdt.gov.vn).")
+    p.add_argument("--version", action="version", version=f"hddt {__version__}")
+    p.add_argument("--env", default=".env", help="File cấu hình .env (mặc định: .env)")
+    p.add_argument("--user", help="MST / tài khoản đăng nhập GDT (ghi đè GDT_USERNAME)")
+    p.add_argument("--password", help="Mật khẩu GDT (ghi đè GDT_PASSWORD)")
+    p.add_argument("--token", help="Dùng sẵn token JWT lấy từ trình duyệt (bỏ qua bước đăng nhập)")
+    p.add_argument("-v", "--verbose", action="store_true", help="In log chi tiết")
+    p.add_argument("--log-file", help="Ghi log ra file")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    s = sub.add_parser("login", help="Kiểm tra đăng nhập")
+    s.add_argument("--in-token", action="store_true", help="In token ra màn hình")
+    s.set_defaults(func=cmd_login)
+
+    s = sub.add_parser("captcha", help="Lấy CAPTCHA và in mã giải được")
+    s.add_argument("--so-lan", type=int, default=1)
+    s.add_argument("--luu", help="Thư mục lưu SVG để kiểm tra")
+    s.set_defaults(func=cmd_captcha)
+
+    def add_range(sp: argparse.ArgumentParser) -> None:
+        sp.add_argument("--tu-ngay", help="Từ ngày lập, dd/mm/yyyy")
+        sp.add_argument("--den-ngay", help="Đến ngày lập, dd/mm/yyyy")
+        sp.add_argument("--thang", help="Lấy trọn tháng, mm/yyyy (thay cho --tu-ngay/--den-ngay)")
+        sp.add_argument("--chieu", choices=sorted(DIRECTION_CHOICES), default="ca-hai", help="mua | ban | ca-hai (mặc định ca-hai)")
+        sp.add_argument("--ttxly", type=int, help="Lọc kết quả kiểm tra (5=đã cấp mã, 6=không mã, 8=máy tính tiền). Mặc định lấy tất cả.")
+        sp.add_argument("--khong-mtt", action="store_true", help="Bỏ qua hóa đơn máy tính tiền (sco-query)")
+        sp.add_argument("--chi-mtt", action="store_true", help="Chỉ lấy hóa đơn máy tính tiền")
+        sp.add_argument("--thu-muc", help="Thư mục kết quả (mặc định OUTPUT_DIR hoặc ./output)")
+
+    s = sub.add_parser("pull", help="Kéo danh sách + XML + xuất Excel")
+    add_range(s)
+    s.add_argument("--excel", help="Đường dẫn file Excel đầu ra")
+    s.add_argument("--khong-xml", action="store_true", help="Chỉ lấy danh sách, không tải XML")
+    s.add_argument("--tai-lai", action="store_true", help="Tải lại XML dù đã có file")
+    s.add_argument("--luong", type=int, help="Số luồng tải XML song song (1-10, mặc định XML_WORKERS=3)")
+    s.set_defaults(func=cmd_pull)
+
+    s = sub.add_parser("excel-gdt", help="Tải file Excel do GDT xuất sẵn")
+    add_range(s)
+    s.set_defaults(func=cmd_excel_gdt)
+
+    s = sub.add_parser("parse-xml", help="Đọc thư mục XML có sẵn và xuất Excel (offline)")
+    s.add_argument("thu_muc_xml", help="Thư mục chứa file .xml")
+    s.add_argument("--chieu", choices=["auto", "mua", "ban", "purchase", "sold"], default="auto")
+    s.add_argument("--excel", help="File Excel đầu ra")
+    s.set_defaults(func=cmd_parse_xml)
+    return p
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    _setup_logging(args.verbose, args.log_file)
+    settings = Settings.from_env(args.env)
+    try:
+        return args.func(args, settings)
+    except LoginError as exc:
+        log.error("%s", exc)
+        return 3
+    except HddtError as exc:
+        log.error("%s", exc)
+        return 1
+    except KeyboardInterrupt:
+        log.warning("Đã dừng theo yêu cầu.")
+        return 130

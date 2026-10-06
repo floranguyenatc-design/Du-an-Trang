@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<HDon xmlns:ds="http://www.w3.org/2000/09/xmldsig#" LoaiHD="1">
+  <DLHDon Id="data">
+    <TTChung>
+      <PBan>2.0.0</PBan>
+      <THDon>HÓA ĐƠN GIÁ TRỊ GIA TĂNG</THDon>
+      <KHMSHDon>1</KHMSHDon>
+      <KHHDon>C25TAA</KHHDon>
+      <SHDon>125</SHDon>
+      <NLap>2025-12-15</NLap>
+      <DVTTe>VND</DVTTe>
+      <TGia>1</TGia>
+      <HTTToan>TM/CK</HTTToan>
+      <MSTTCGP>0101243150</MSTTCGP>
+      <TTKhac><TTin><TTruong>MaTraCuu</TTruong><KDLieu>string</KDLieu><DLieu>ABC123</DLieu></TTin></TTKhac>
+    </TTChung>
+    <NDHDon>
+      <NBan>
+        <Ten>CÔNG TY TNHH ABC</Ten>
+        <MST>0312345678</MST>
+        <DChi>123 Lê Lợi, Q1, TP.HCM</DChi>
+        <SDThoai>0909000000</SDThoai>
+        <STKNHang>123456789</STKNHang>
+      </NBan>
+      <NMua>
+        <Ten>CÔNG TY CP XYZ</Ten>
+        <MST>0109876543</MST>
+        <DChi>45 Trần Phú, Hà Nội</DChi>
+        <DCTDTu>kt@xyz.vn</DCTDTu>
+      </NMua>
+      <DSHHDVu>
+        <HHDVu>
+          <TChat>1</TChat><STT>1</STT><MHHDVu>SP01</MHHDVu><THHDVu>Dịch vụ tư vấn</THHDVu>
+          <DVTinh>Gói</DVTinh><SLuong>2</SLuong><DGia>1000000</DGia><ThTien>2000000</ThTien><TSuat>10%</TSuat>
+          <TTKhac><TTin><TTruong>TThue</TTruong><KDLieu>numeric</KDLieu><DLieu>200000</DLieu></TTin></TTKhac>
+        </HHDVu>
+        <HHDVu>
+          <TChat>1</TChat><STT>2</STT><THHDVu>Văn phòng phẩm</THHDVu>
+          <DVTinh>Hộp</DVTinh><SLuong>10</SLuong><DGia>50000</DGia><ThTien>500000</ThTien><TSuat>8%</TSuat><TThue>40000</TThue>
+        </HHDVu>
+        <HHDVu>
+          <TChat>4</TChat><STT>3</STT><THHDVu>Ghi chú: giao hàng tận nơi</THHDVu>
+        </HHDVu>
+      </DSHHDVu>
+      <TToan>
+        <THTTLTSuat>
+          <LTSuat><TSuat>10%</TSuat><ThTien>2000000</ThTien><TThue>200000</TThue></LTSuat>
+          <LTSuat><TSuat>8%</TSuat><ThTien>500000</ThTien><TThue>40000</TThue></LTSuat>
+        </THTTLTSuat>
+        <TgTCThue>2500000</TgTCThue>
+        <TgTThue>240000</TgTThue>
+        <TTCKTMai>0</TTCKTMai>
+        <TgTTTBSo>2740000</TgTTTBSo>
+        <TgTTTBChu>Hai triệu bảy trăm bốn mươi nghìn đồng</TgTTTBChu>
+      </TToan>
+    </NDHDon>
+  </DLHDon>
+  <MCCQT Id="MCCQT">M1-25-ABCDE-00000000001</MCCQT>
+  <DSCKS>
+    <NBan><ds:Signature Id="seller"><ds:Object><SigningTime>2025-12-15T10:20:30</SigningTime></ds:Object></ds:Signature></NBan>
+    <CQT><ds:Signature Id="cqt"><ds:Object><SigningTime>2025-12-15T10:25:00</SigningTime></ds:Object></ds:Signature></CQT>
+  </DSCKS>
+</HDon>

@@ -242,7 +242,8 @@ def run_gui() -> None:
     b_stop = ttk.Button(btns, text="■  Dừng", state="disabled")
     b_open = ttk.Button(btns, text="Mở thư mục kết quả")
     b_excel = ttk.Button(btns, text="Mở file Excel", state="disabled")
-    for b in (b_login, b_start, b_stop, b_open, b_excel):
+    b_misa = ttk.Button(btns, text="Xuất sang MISA")
+    for b in (b_login, b_start, b_stop, b_open, b_excel, b_misa):
         b.pack(side="left", padx=4)
 
     prog = ttk.Progressbar(frm, mode="determinate")
@@ -322,10 +323,10 @@ def run_gui() -> None:
         except OSError as exc:
             append(f"Không lưu được .env: {exc}")
 
-    def set_busy(busy: bool) -> None:
-        for b in (b_login, b_start):
+    def set_busy(busy: bool, stoppable: bool = True) -> None:
+        for b in (b_login, b_start, b_misa):
             b.config(state="disabled" if busy else "normal")
-        b_stop.config(state="normal" if busy else "disabled")
+        b_stop.config(state="normal" if busy and stoppable else "disabled")
 
     def make_client() -> GdtClient:
         return GdtClient(
@@ -423,6 +424,44 @@ def run_gui() -> None:
         state["thread"] = threading.Thread(target=worker, daemon=True)
         state["thread"].start()
 
+    def do_misa() -> None:
+        from hddt.misa import MisaSettings, export_misa
+
+        out_dir = v_out.get().strip() or "output"
+        set_busy(True, stoppable=False)
+        v_status.set("Đang chuẩn bị dữ liệu cho MISA SME...")
+        append("=" * 70)
+
+        def worker() -> None:
+            try:
+                res = export_misa(out_dir, MisaSettings(
+                    tk_chi_phi=env.get("MISA_TK_CHI_PHI", "642") or "642",
+                    tk_cong_no=env.get("MISA_TK_CONG_NO", "331") or "331",
+                    tk_thue=env.get("MISA_TK_THUE", "1331") or "1331",
+                ))
+                msg = (
+                    f"Đã chuẩn bị {res.vouchers} hóa đơn mua vào ({res.lines} dòng hàng) cho MISA SME.\n\n"
+                    f"• Thư mục xml_mua_vao: {res.xml_files} file XML để MISA đọc trực tiếp.\n"
+                    f"• File MISA_NhapKhau_MuaHang.xlsx: chứng từ + danh mục {res.suppliers} nhà cung cấp, {res.items} mã hàng.\n"
+                    f"• {res.no_xml} hóa đơn không có XML: nhập bằng file Excel.\n"
+                    f"• {res.skipped} hóa đơn bị hủy/bị thay thế: không đưa vào (sheet BoQua).\n\n"
+                    "Cách nhập vào MISA xem file HUONG_DAN_NHAP_MISA.txt trong thư mục misa (sẽ mở ngay)."
+                )
+
+                def finish() -> None:
+                    v_status.set(f"Đã chuẩn bị {res.vouchers} hóa đơn cho MISA: {res.folder}")
+                    messagebox.showinfo("Xuất sang MISA", msg)
+                    open_path(str(Path(res.folder).resolve()))
+                ui(finish)
+            except Exception as exc:  # noqa: BLE001
+                m = str(exc) or type(exc).__name__
+                logger.error("Lỗi xuất MISA: %s", m)
+                ui(lambda m=m: (v_status.set(f"Lỗi: {m}"), messagebox.showerror("Lỗi xuất MISA", m)))
+            finally:
+                ui(lambda: set_busy(False))
+
+        threading.Thread(target=worker, daemon=True).start()
+
     def do_stop() -> None:
         state["stop"].set()
         v_status.set("Đang dừng... (chờ request hiện tại kết thúc, kết quả đã tải vẫn được ghi ra Excel)")
@@ -450,6 +489,7 @@ def run_gui() -> None:
     b_stop.config(command=do_stop)
     b_open.config(command=do_open_dir)
     b_excel.config(command=lambda: open_path(state["excel"]))
+    b_misa.config(command=do_misa)
 
     def on_close() -> None:
         if state["thread"] and state["thread"].is_alive():

@@ -15,6 +15,8 @@ Thuế dùng, tự đọc CAPTCHA SVG, phân trang theo `state`, tải XML qua `
 4. Xong thì bấm **Mở file Excel**. Sheet `HoaDon` là bảng kê (có cột đường dẫn file PDF), sheet `ChiTiet` là từng dòng hàng hóa (tên hàng, ĐVT, số lượng, đơn giá, thành tiền, thuế), sheet `Loi` là hóa đơn không tải được.
 5. Thư mục `pdf` chứa **mỗi hóa đơn một file PDF** (bản thể hiện dựng từ XML gốc, hoặc từ dữ liệu chi tiết trên cổng thuế với hóa đơn không có XML). Bỏ tick **Tạo file PDF** nếu không cần.
 
+6. Muốn đưa vào **MISA SME**: bấm **Xuất sang MISA**. Tool tạo thư mục `misa` gồm `xml_mua_vao` (XML để MISA đọc trực tiếp), `MISA_NhapKhau_MuaHang.xlsx` (chứng từ mua hàng + danh mục nhà cung cấp, vật tư hàng hóa) và `HUONG_DAN_NHAP_MISA.txt` hướng dẫn từng bước.
+
 Muốn chạy bằng dòng lệnh thì dùng `cai_dat.bat`, `dang_nhap.bat`, `keo_hoa_don.bat` hoặc các lệnh bên dưới.
 
 ## 1. Cài đặt
@@ -57,6 +59,9 @@ python -m hddt pull --thang 12/2025 --chi-mtt
 
 # Tải file Excel do chính GDT xuất (giống nút "Xuất Excel" trên web)
 python -m hddt excel-gdt --thang 12/2025 --chieu mua
+
+# Chuẩn bị file nhập khẩu MISA SME từ hóa đơn mua vào đã kéo
+python -m hddt misa --thu-muc output
 
 # Đọc lại thư mục XML đã tải (offline) ra Excel
 python -m hddt parse-xml output/xml --excel output/HoaDon_Local.xlsx

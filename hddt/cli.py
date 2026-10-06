@@ -172,6 +172,22 @@ def cmd_pull(args: argparse.Namespace, settings: Settings) -> int:
     return 0 if not res.errors else 2
 
 
+def cmd_misa(args: argparse.Namespace, settings: Settings) -> int:
+    from .misa import MisaSettings, export_misa
+
+    res = export_misa(
+        args.thu_muc or settings.output_dir,
+        MisaSettings(tk_chi_phi=settings.misa_tk_chi_phi, tk_cong_no=settings.misa_tk_cong_no, tk_thue=settings.misa_tk_thue),
+    )
+    print(f"Đã chuẩn bị {res.vouchers} chứng từ ({res.lines} dòng hàng) cho MISA SME.")
+    print(f"  File Excel nhập khẩu : {res.excel_path}")
+    print(f"  XML cho MISA đọc     : {res.xml_dir} ({res.xml_files} file)")
+    print(f"  Không có XML gốc     : {res.no_xml} hóa đơn (dùng file Excel)")
+    print(f"  Bỏ qua (hủy/thay thế): {res.skipped}")
+    print(f"  Hướng dẫn            : {Path(res.folder) / 'HUONG_DAN_NHAP_MISA.txt'}")
+    return 0
+
+
 def cmd_parse_xml(args: argparse.Namespace, settings: Settings) -> int:
     folder = Path(args.thu_muc_xml)
     if not folder.is_dir():
@@ -257,6 +273,10 @@ def build_parser() -> argparse.ArgumentParser:
     add_range(s)
     s.set_defaults(func=cmd_excel_gdt)
 
+    s = sub.add_parser("misa", parents=[common], help="Chuẩn bị file nhập khẩu MISA SME từ hóa đơn mua vào đã kéo")
+    s.add_argument("--thu-muc", help="Thư mục kết quả đã kéo (mặc định OUTPUT_DIR hoặc ./output)")
+    s.set_defaults(func=cmd_misa)
+
     s = sub.add_parser("parse-xml", parents=[common], help="Đọc thư mục XML có sẵn và xuất Excel (offline)")
     s.add_argument("thu_muc_xml", help="Thư mục chứa file .xml")
     s.add_argument("--chieu", choices=["auto", "mua", "ban", "purchase", "sold"], default="auto")
@@ -275,7 +295,7 @@ def main(argv: list[str] | None = None) -> int:
     except LoginError as exc:
         log.error("%s", exc)
         return 3
-    except HddtError as exc:
+    except (HddtError, FileNotFoundError) as exc:
         log.error("%s", exc)
         return 1
     except KeyboardInterrupt:

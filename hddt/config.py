@@ -58,6 +58,9 @@ class Settings:
     timeout: float = 90.0
     verify_ssl: bool = True
     user_agent: str = ""
+    misa_tk_chi_phi: str = "642"
+    misa_tk_cong_no: str = "331"
+    misa_tk_thue: str = "1331"
 
     @classmethod
     def from_env(cls, env_file: str = ".env") -> "Settings":
@@ -75,6 +78,9 @@ class Settings:
             timeout=float(g("HTTP_TIMEOUT_SECONDS", "90") or 90),
             verify_ssl=_bool(g("VERIFY_SSL"), True),
             user_agent=g("BROWSER_USER_AGENT", ""),
+            misa_tk_chi_phi=g("MISA_TK_CHI_PHI", "642") or "642",
+            misa_tk_cong_no=g("MISA_TK_CONG_NO", "331") or "331",
+            misa_tk_thue=g("MISA_TK_THUE", "1331") or "1331",
         )
 
     def proxies(self) -> dict[str, str] | None:

@@ -45,6 +45,10 @@ DEFAULT_USER_AGENT = (
 FAMILIES = ("query", "sco-query")
 DIRECTIONS = ("purchase", "sold")
 
+# Giá trị "Kết quả kiểm tra hóa đơn" (ttxly) dùng khi tra hóa đơn mua vào:
+# hóa đơn điện tử thường: 5 = đã cấp mã, 6 = không mã; máy tính tiền: 8.
+PURCHASE_TTXLY: dict[str, tuple[int, ...]] = {"query": (5, 6), "sco-query": (8,)}
+
 # Nhãn tiếng Việt cho các mã trạng thái GDT trả về trong danh sách.
 TTHAI_LABELS = {
     1: "Hóa đơn mới",
@@ -249,7 +253,9 @@ class GdtClient:
         json_body: Any = None,
         allow_relogin: bool = True,
         retry_5xx: bool = True,
+        max_retries: int | None = None,
     ) -> requests.Response:
+        max_retries = self.max_retries if max_retries is None else max_retries
         attempt = 0
         rate_limit_hits = 0
         relogged = False
@@ -262,10 +268,10 @@ class GdtClient:
             try:
                 resp = self.session.request(method, url, headers=headers, json=json_body, timeout=self.timeout)
             except requests.RequestException as exc:
-                if attempt > self.max_retries:
+                if attempt > max_retries:
                     raise ApiError(f"Lỗi mạng khi gọi {url}: {exc}") from exc
                 wait = min(2.0 * attempt, 10.0)
-                log.warning("Lỗi mạng (%s), thử lại sau %.0fs (%d/%d)", exc, wait, attempt, self.max_retries)
+                log.warning("Lỗi mạng (%s), thử lại sau %.0fs (%d/%d)", exc, wait, attempt, max_retries)
                 self._sleep(wait)
                 continue
 
@@ -285,14 +291,16 @@ class GdtClient:
                 self.login()
                 continue
 
-            if resp.status_code >= 500 and retry_5xx and attempt <= self.max_retries:
+            if resp.status_code >= 500 and retry_5xx and attempt <= max_retries:
                 wait = min(3.0 * attempt, 15.0)
-                log.warning("GDT trả HTTP %s; thử lại sau %.0fs (%d/%d)", resp.status_code, wait, attempt, self.max_retries)
+                log.warning("GDT trả HTTP %s; thử lại sau %.0fs (%d/%d)", resp.status_code, wait, attempt, max_retries)
                 self._sleep(wait)
                 continue
 
             if resp.status_code >= 400:
-                raise ApiError(f"HTTP {resp.status_code} khi gọi {url}", resp.status_code, resp.text[:500])
+                detail = _extract_message(resp.text[:500])
+                detail = f" - {detail[:200]}" if detail else ""
+                raise ApiError(f"HTTP {resp.status_code} khi gọi {url}{detail}", resp.status_code, resp.text[:500])
             return resp
 
     # ----------------------------------------------------------------- Login
@@ -378,44 +386,100 @@ class GdtClient:
         extra_search: str = "",
         page_size: int = 50,
         on_page: Callable[[str, str, date, date, int, int], None] | None = None,
+        on_error: Callable[[str, str, date, date, Exception], None] | None = None,
     ) -> Iterator[InvoiceRef]:
-        """Duyệt toàn bộ hóa đơn mua vào (purchase) hoặc bán ra (sold) trong khoảng ngày."""
+        """Duyệt toàn bộ hóa đơn mua vào (purchase) hoặc bán ra (sold) trong khoảng ngày.
+
+        Trang thuế bắt buộc chọn "Kết quả kiểm tra hóa đơn" (ttxly) khi tra cứu hóa đơn
+        mua vào, nên nếu không chỉ định ttxly thì tool tự tra lần lượt từng giá trị
+        (query: 5 đã cấp mã, 6 không mã; sco-query: 8 máy tính tiền) rồi gộp lại.
+        Hóa đơn bán ra tra không cần ttxly; nếu GDT từ chối thì cũng tách như trên.
+        Lỗi ở một kỳ/nguồn chỉ bỏ qua kỳ đó (báo qua on_error), không dừng toàn bộ.
+        """
         if direction not in DIRECTIONS:
             raise ValueError(f"direction phải là purchase|sold, nhận {direction!r}")
-        action = "Tìm kiếm"
         for family in families:
+            defaults = PURCHASE_TTXLY[family]
+            if ttxly is not None:
+                plans: list[int | None] = [ttxly]
+            elif direction == "purchase":
+                plans = list(defaults)
+            else:
+                plans = [None]
             for m_start, m_end in month_ranges(start, end):
-                search = build_search(m_start, m_end, ttxly, extra_search)
-                state = ""
-                seen_states: set[str] = set()
-                page = 0
-                total_in_period = 0
-                while True:
-                    page += 1
-                    url = (
-                        f"{API_URL}/{family}/invoices/{direction}"
-                        f"?sort=tdlap%3Adesc%2Ckhmshdon%3Aasc%2Cshdon%3Adesc&size={page_size}&search={quote(search)}"
-                    )
-                    if state:
-                        url += "&state=" + quote(state)
-                    payload = self._request("GET", url, action=action).json()
-                    datas = payload.get("datas")
-                    if datas is None:
-                        raise ApiError("Phản hồi danh sách không có trường 'datas'.", body=str(payload)[:300])
-                    for item in datas:
-                        if isinstance(item, dict):
-                            total_in_period += 1
-                            yield InvoiceRef.from_json(direction, family, item)
-                    if on_page:
-                        on_page(direction, family, m_start, m_end, page, len(datas))
-                    state = str(payload.get("state") or "").strip()
-                    if not state or state in seen_states:
-                        break
-                    seen_states.add(state)
-                log.info(
-                    "[DANH SÁCH] %s/%s kỳ %s-%s: %d hóa đơn (%d trang).",
-                    direction, family, f"{m_start:%d/%m/%Y}", f"{m_end:%d/%m/%Y}", total_in_period, page,
+                try:
+                    try:
+                        yield from self._iter_period(direction, family, m_start, m_end, plans, extra_search, page_size, on_page)
+                    except ApiError as exc:
+                        if plans == [None] and exc.status in (400, 500):
+                            log.warning(
+                                "[DANH SÁCH] %s/%s kỳ %s-%s: GDT từ chối tra cứu không lọc (HTTP %s); tách theo kết quả kiểm tra %s.",
+                                direction, family, f"{m_start:%d/%m/%Y}", f"{m_end:%d/%m/%Y}", exc.status, list(defaults),
+                            )
+                            yield from self._iter_period(direction, family, m_start, m_end, list(defaults), extra_search, page_size, on_page)
+                        else:
+                            raise
+                except StopRequested:
+                    raise
+                except HddtError as exc:
+                    log.error("[DANH SÁCH] %s/%s kỳ %s-%s thất bại: %s", direction, family, f"{m_start:%d/%m/%Y}", f"{m_end:%d/%m/%Y}", exc)
+                    if on_error:
+                        on_error(direction, family, m_start, m_end, exc)
+                    else:
+                        raise
+
+    def _iter_period(
+        self,
+        direction: str,
+        family: str,
+        m_start: date,
+        m_end: date,
+        plans: list[int | None],
+        extra_search: str,
+        page_size: int,
+        on_page: Callable[[str, str, date, date, int, int], None] | None,
+    ) -> Iterator[InvoiceRef]:
+        total_in_period = 0
+        pages = 0
+        seen_keys: set[tuple[str, str, str, str]] = set()
+        for plan in plans:
+            search = build_search(m_start, m_end, plan, extra_search)
+            state = ""
+            seen_states: set[str] = set()
+            page = 0
+            while True:
+                page += 1
+                pages += 1
+                url = (
+                    f"{API_URL}/{family}/invoices/{direction}"
+                    f"?sort=tdlap%3Adesc%2Ckhmshdon%3Aasc%2Cshdon%3Adesc&size={page_size}&search={quote(search)}"
                 )
+                if state:
+                    url += "&state=" + quote(state)
+                payload = self._request("GET", url, action="Tìm kiếm", max_retries=1).json()
+                datas = payload.get("datas")
+                if datas is None:
+                    raise ApiError("Phản hồi danh sách không có trường 'datas'.", body=str(payload)[:300])
+                for item in datas:
+                    if not isinstance(item, dict):
+                        continue
+                    ref = InvoiceRef.from_json(direction, family, item)
+                    key = (ref.nbmst, ref.khmshdon, ref.khhdon, ref.shdon)
+                    if key in seen_keys:
+                        continue
+                    seen_keys.add(key)
+                    total_in_period += 1
+                    yield ref
+                if on_page:
+                    on_page(direction, family, m_start, m_end, page, len(datas))
+                state = str(payload.get("state") or "").strip()
+                if not state or state in seen_states:
+                    break
+                seen_states.add(state)
+        log.info(
+            "[DANH SÁCH] %s/%s kỳ %s-%s: %d hóa đơn (%d trang).",
+            direction, family, f"{m_start:%d/%m/%Y}", f"{m_end:%d/%m/%Y}", total_in_period, pages,
+        )
 
     def list_invoices(self, direction: str, start: date, end: date, **kw: Any) -> list[InvoiceRef]:
         return list(self.iter_invoices(direction, start, end, **kw))

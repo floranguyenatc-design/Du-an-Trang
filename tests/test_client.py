@@ -39,6 +39,7 @@ class FakeGdt:
         self.fail_captcha_once = False
         self.expire_token_once = False
         self.rate_limit_once = False
+        self.require_ttxly_for_sold = False
         self.invoices = {
             ("query", "purchase"): [
                 {"nbmst": "0312345678", "khmshdon": "1", "khhdon": "C25TAA", "shdon": "125", "tdlap": "2025-12-15T00:00:00", "tthai": 1, "ttxly": 5, "tgtttbso": 2740000},
@@ -48,7 +49,9 @@ class FakeGdt:
             ("sco-query", "purchase"): [
                 {"nbmst": "0355555555", "khmshdon": "1", "khhdon": "C25MAA", "shdon": "9", "tdlap": "2025-12-02T00:00:00", "tthai": 1, "ttxly": 8, "tgtttbso": 9},
             ],
-            ("query", "sold"): [],
+            ("query", "sold"): [
+                {"nbmst": "0109876543", "khmshdon": "1", "khhdon": "C25TXX", "shdon": "1", "tdlap": "2025-12-05T00:00:00", "tthai": 1, "ttxly": 5, "tgtttbso": 10},
+            ],
             ("sco-query", "sold"): [],
         }
 
@@ -88,6 +91,9 @@ class FakeGdt:
             search = q["search"][0]
             assert search.startswith("tdlap=ge=01/12/2025T00:00:00;tdlap=le=31/12/2025T23:59:59"), search
             items = self.invoices[(family, endpoint)]
+            # GDT thật: tra hóa đơn mua vào bắt buộc có ttxly, thiếu là HTTP 500.
+            if "ttxly==" not in search and (endpoint == "purchase" or self.require_ttxly_for_sold):
+                return FakeResponse(500, {"message": "Internal Server Error"})
             if "ttxly==" in search:
                 want = int(search.split("ttxly==")[1].split(";")[0])
                 items = [i for i in items if i["ttxly"] == want]
@@ -148,9 +154,47 @@ def test_list_invoices_paginates_by_state_over_both_families(client, fake):
     refs = client.list_invoices("purchase", date(2025, 12, 1), date(2025, 12, 31), page_size=2)
     assert [(r.family, r.shdon) for r in refs] == [("query", "125"), ("query", "126"), ("query", "7"), ("sco-query", "9")]
     list_calls = [c for c in fake.calls if "/invoices/purchase" in c[1]]
-    assert len(list_calls) == 3  # query: 2 trang, sco-query: 1 trang
+    # query: ttxly 5 (1 trang) + ttxly 6 (1 trang); sco-query: ttxly 8 (1 trang)
+    assert len(list_calls) == 3
     assert all(c[2]["Authorization"] == "Bearer jwt-token-1" for c in list_calls)
-    assert "state=2" in list_calls[1][1]
+    assert [unquote(c[1]).split("ttxly==")[1][:1] for c in list_calls] == ["5", "6", "8"]
+
+
+def test_purchase_pagination_with_state(client, fake):
+    refs = client.list_invoices("purchase", date(2025, 12, 1), date(2025, 12, 31), page_size=1, families=["query"])
+    assert [r.shdon for r in refs] == ["125", "126", "7"]
+    calls = [c[1] for c in fake.calls if "/invoices/purchase" in c[1]]
+    assert len(calls) == 3 and "state=1" in calls[1]
+
+
+def test_sold_without_ttxly_then_fallback(client, fake):
+    refs = client.list_invoices("sold", date(2025, 12, 1), date(2025, 12, 31), page_size=2)
+    assert [r.shdon for r in refs] == ["1"]
+    assert not any("ttxly" in c[1] for c in fake.calls if "/invoices/sold" in c[1])
+    fake.calls.clear()
+    fake.require_ttxly_for_sold = True
+    refs = client.list_invoices("sold", date(2025, 12, 1), date(2025, 12, 31), page_size=2)
+    assert [r.shdon for r in refs] == ["1"]
+    sold_calls = [unquote(c[1]) for c in fake.calls if "/invoices/sold" in c[1]]
+    assert "ttxly" not in sold_calls[0] and any("ttxly==5" in c for c in sold_calls)
+
+
+def test_period_error_reported_and_other_periods_continue(client, fake):
+    errors = []
+    original = fake.request
+
+    def flaky(method, url, **kw):
+        if "/invoices/purchase" in url and "01/11/2025" in unquote(url):
+            return FakeResponse(500, {"message": "boom"})
+        return original(method, url, **kw)
+
+    client.session.request.side_effect = flaky
+    refs = client.list_invoices(
+        "purchase", date(2025, 11, 1), date(2025, 12, 31), page_size=2, families=["query"],
+        on_error=lambda d, f, s, e, exc: errors.append((f"{s:%m/%Y}", str(exc))),
+    )
+    assert [r.shdon for r in refs] == ["125", "126", "7"]
+    assert [e[0] for e in errors] == ["11/2025"] and "HTTP 500" in errors[0][1]
 
 
 def test_list_invoices_ttxly_filter(client):

@@ -81,12 +81,16 @@ def run_pull(
     refs: list[InvoiceRef] = []
     errors: list[dict[str, Any]] = []
     seen: set[tuple[str, ...]] = set()
+    def on_error(d: str, f: str, s: date, e: date, exc: Exception) -> None:
+        errors.append(_err(d, f, None, "Danh sách", f"Kỳ {s:%d/%m/%Y}-{e:%d/%m/%Y}: {exc}"))
+
     for direction in opts.directions:
         if stop_event.is_set():
             break
         try:
             for ref in client.iter_invoices(
                 direction, opts.start, opts.end, families=opts.families, ttxly=opts.ttxly, page_size=opts.page_size,
+                on_error=on_error,
                 on_page=lambda d, f, s, e, p, n: log.info(
                     "[DANH SÁCH] %s/%s %s-%s trang %d: +%d hóa đơn",
                     "mua vào" if d == "purchase" else "bán ra", "MTT" if f == "sco-query" else "HĐĐT",

@@ -70,3 +70,13 @@ def test_parse_xml_offline(tmp_path, monkeypatch):
     assert wb["ChiTiet"].max_row == 4
     detail = list(wb["ChiTiet"].iter_rows(min_row=2, values_only=True))
     assert detail[0][10] == "Dịch vụ tư vấn" and detail[0][18] == 200000
+
+
+def test_global_options_accepted_after_subcommand(tmp_path, monkeypatch):
+    fake = FakeGdt()
+    out = tmp_path / "out"
+    log = tmp_path / "log.txt"
+    code = _run(["pull", "--env", "x", "--log-file", str(log), "--thang", "01/12/2025-31/12/2025", "--chieu", "mua", "--thu-muc", str(out), "--khong-xml"], fake, monkeypatch)
+    assert code == 0
+    assert (out / "HoaDon_20251201_20251231.xlsx").is_file()
+    assert log.is_file()

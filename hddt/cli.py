@@ -77,6 +77,9 @@ def _families(args: argparse.Namespace) -> list[str]:
 
 
 def _default_dates(args: argparse.Namespace) -> tuple[date, date]:
+    if args.thang and "-" in args.thang.strip() and args.thang.count("/") >= 4:
+        a, _, b = args.thang.partition("-")
+        args.tu_ngay, args.den_ngay, args.thang = a.strip(), b.strip(), None
     if args.thang:
         y, m = _parse_month(args.thang)
         start = date(y, m, 1)
@@ -305,12 +308,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-v", "--verbose", action="store_true", help="In log chi tiết")
     p.add_argument("--log-file", help="Ghi log ra file")
     sub = p.add_subparsers(dest="cmd", required=True)
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("-v", "--verbose", action="store_true", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+    common.add_argument("--log-file", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+    common.add_argument("--env", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+    common.add_argument("--user", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+    common.add_argument("--password", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+    common.add_argument("--token", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
 
-    s = sub.add_parser("login", help="Kiểm tra đăng nhập")
+    s = sub.add_parser("login", parents=[common], help="Kiểm tra đăng nhập")
     s.add_argument("--in-token", action="store_true", help="In token ra màn hình")
     s.set_defaults(func=cmd_login)
 
-    s = sub.add_parser("captcha", help="Lấy CAPTCHA và in mã giải được")
+    s = sub.add_parser("captcha", parents=[common], help="Lấy CAPTCHA và in mã giải được")
     s.add_argument("--so-lan", type=int, default=1)
     s.add_argument("--luu", help="Thư mục lưu SVG để kiểm tra")
     s.set_defaults(func=cmd_captcha)
@@ -325,7 +335,7 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--chi-mtt", action="store_true", help="Chỉ lấy hóa đơn máy tính tiền")
         sp.add_argument("--thu-muc", help="Thư mục kết quả (mặc định OUTPUT_DIR hoặc ./output)")
 
-    s = sub.add_parser("pull", help="Kéo danh sách + XML + xuất Excel")
+    s = sub.add_parser("pull", parents=[common], help="Kéo danh sách + XML + xuất Excel")
     add_range(s)
     s.add_argument("--excel", help="Đường dẫn file Excel đầu ra")
     s.add_argument("--khong-xml", action="store_true", help="Chỉ lấy danh sách, không tải XML")
@@ -333,11 +343,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--luong", type=int, help="Số luồng tải XML song song (1-10, mặc định XML_WORKERS=3)")
     s.set_defaults(func=cmd_pull)
 
-    s = sub.add_parser("excel-gdt", help="Tải file Excel do GDT xuất sẵn")
+    s = sub.add_parser("excel-gdt", parents=[common], help="Tải file Excel do GDT xuất sẵn")
     add_range(s)
     s.set_defaults(func=cmd_excel_gdt)
 
-    s = sub.add_parser("parse-xml", help="Đọc thư mục XML có sẵn và xuất Excel (offline)")
+    s = sub.add_parser("parse-xml", parents=[common], help="Đọc thư mục XML có sẵn và xuất Excel (offline)")
     s.add_argument("thu_muc_xml", help="Thư mục chứa file .xml")
     s.add_argument("--chieu", choices=["auto", "mua", "ban", "purchase", "sold"], default="auto")
     s.add_argument("--excel", help="File Excel đầu ra")

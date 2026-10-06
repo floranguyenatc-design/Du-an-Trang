@@ -256,6 +256,12 @@ def run_gui() -> None:
 
     # --- log
     log_q: "queue.Queue[str]" = queue.Queue()
+    ui_q: "queue.Queue" = queue.Queue()
+
+    def ui(fn) -> None:
+        """Lên lịch chạy fn trên luồng giao diện (an toàn khi gọi từ luồng nền)."""
+        ui_q.put(fn)
+
     handler = QueueLogHandler(log_q)
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)-5s %(message)s", "%H:%M:%S"))
     logger = logging.getLogger("hddt")
@@ -274,7 +280,16 @@ def run_gui() -> None:
                 append(log_q.get_nowait())
         except queue.Empty:
             pass
-        root.after(200, poll)
+        try:
+            while True:
+                fn = ui_q.get_nowait()
+                try:
+                    fn()
+                except Exception as exc:  # noqa: BLE001
+                    append(f"Lỗi giao diện: {exc}")
+        except queue.Empty:
+            pass
+        root.after(150, poll)
 
     poll()
 
@@ -343,17 +358,17 @@ def run_gui() -> None:
                     info = " - " + " / ".join(str(p[k]) for k in ("name", "tin") if p.get(k))
                 except HddtError:
                     pass
-                root.after(0, lambda: (v_status.set("Đăng nhập thành công" + info), messagebox.showinfo("OK", "Đăng nhập thành công" + info)))
+                ui(lambda: (v_status.set("Đăng nhập thành công" + info), messagebox.showinfo("OK", "Đăng nhập thành công" + info)))
             except LoginError as exc:
                 msg = str(exc)
-                root.after(0, lambda m=msg: (v_status.set(f"Đăng nhập thất bại: {m}"), messagebox.showerror("Đăng nhập thất bại", m)))
+                ui(lambda m=msg: (v_status.set(f"Đăng nhập thất bại: {m}"), messagebox.showerror("Đăng nhập thất bại", m)))
             except Exception as exc:  # noqa: BLE001
                 msg = str(exc) or type(exc).__name__
                 logger.error("Lỗi: %s", msg)
                 logger.debug("Chi tiết lỗi:\n%s", traceback.format_exc())
-                root.after(0, lambda m=msg: (v_status.set(f"Lỗi: {m}"), messagebox.showerror("Lỗi", m)))
+                ui(lambda m=msg: (v_status.set(f"Lỗi: {m}"), messagebox.showerror("Lỗi", m)))
             finally:
-                root.after(0, lambda: set_busy(False))
+                ui(lambda: set_busy(False))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -374,7 +389,7 @@ def run_gui() -> None:
         append("=" * 70)
 
         def progress(done: int, total: int) -> None:
-            root.after(0, lambda: (prog.config(maximum=max(total, 1), value=done), v_status.set(f"Đang tải XML {done}/{total}...")))
+            ui(lambda: (prog.config(maximum=max(total, 1), value=done), v_status.set(f"Đang tải XML {done}/{total}...")))
 
         def worker() -> None:
             try:
@@ -388,17 +403,17 @@ def run_gui() -> None:
                     v_status.set(msg.splitlines()[0])
                     b_excel.config(state="normal")
                     messagebox.showinfo("Kết quả", msg + ("\n\nXem sheet 'Loi' trong Excel để biết hóa đơn nào lỗi." if res.errors else ""))
-                root.after(0, finish)
+                ui(finish)
             except LoginError as exc:
                 msg = str(exc)
-                root.after(0, lambda m=msg: (v_status.set(f"Đăng nhập thất bại: {m}"), messagebox.showerror("Đăng nhập thất bại", m)))
+                ui(lambda m=msg: (v_status.set(f"Đăng nhập thất bại: {m}"), messagebox.showerror("Đăng nhập thất bại", m)))
             except Exception as exc:  # noqa: BLE001
                 msg = str(exc) or type(exc).__name__
                 logger.error("Lỗi: %s", msg)
                 logger.debug("Chi tiết lỗi:\n%s", traceback.format_exc())
-                root.after(0, lambda m=msg: (v_status.set(f"Lỗi: {m}"), messagebox.showerror("Lỗi", m)))
+                ui(lambda m=msg: (v_status.set(f"Lỗi: {m}"), messagebox.showerror("Lỗi", m)))
             finally:
-                root.after(0, lambda: set_busy(False))
+                ui(lambda: set_busy(False))
 
         state["thread"] = threading.Thread(target=worker, daemon=True)
         state["thread"].start()

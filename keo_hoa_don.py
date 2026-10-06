@@ -28,7 +28,7 @@ ERROR_FILE = HERE / "loi_giao_dien.txt"
 def ensure_dependencies() -> str:
     """Cài requests/openpyxl nếu máy chưa có. Trả về thông báo (rỗng nếu không làm gì)."""
     missing = []
-    for mod in ("requests", "openpyxl"):
+    for mod in ("requests", "openpyxl", "reportlab"):
         try:
             __import__(mod)
         except ImportError:
@@ -117,6 +117,7 @@ def build_options(form: dict):
         output_dir=out_dir,
         download_xml=bool(form.get("download_xml", True)),
         redownload=bool(form.get("redownload", False)),
+        make_pdf=bool(form.get("make_pdf", True)),
         workers=int(form.get("workers") or 3),
     )
 
@@ -211,11 +212,13 @@ def run_gui() -> None:
     v_sco = tk.BooleanVar(value=True)
     v_xml = tk.BooleanVar(value=True)
     v_redo = tk.BooleanVar(value=False)
+    v_pdf = tk.BooleanVar(value=True)
     v_remember = tk.BooleanVar(value=True)
     opt_frame = ttk.Frame(frm)
     opt_frame.grid(row=4, column=1, columnspan=4, sticky="w", **pad)
     ttk.Checkbutton(opt_frame, text="Gồm hóa đơn máy tính tiền", variable=v_sco).pack(side="left", padx=4)
     ttk.Checkbutton(opt_frame, text="Tải XML gốc (lấy chi tiết hàng hóa)", variable=v_xml).pack(side="left", padx=4)
+    ttk.Checkbutton(opt_frame, text="Tạo file PDF", variable=v_pdf).pack(side="left", padx=4)
     ttk.Checkbutton(opt_frame, text="Tải lại XML đã có", variable=v_redo).pack(side="left", padx=4)
     ttk.Checkbutton(opt_frame, text="Ghi nhớ mật khẩu", variable=v_remember).pack(side="left", padx=4)
 
@@ -305,6 +308,7 @@ def run_gui() -> None:
             "include_sco": v_sco.get(),
             "download_xml": v_xml.get(),
             "redownload": v_redo.get(),
+            "make_pdf": v_pdf.get() and v_xml.get(),
             "output_dir": v_out.get(),
             "workers": 3,
         }
@@ -397,7 +401,8 @@ def run_gui() -> None:
                 state["excel"] = res.excel_path
                 msg = (
                     f"{'ĐÃ DỪNG. ' if res.stopped else 'XONG. '}"
-                    f"Hóa đơn: {res.invoices} | Dòng hàng hóa: {res.lines} | Lỗi: {res.errors}\n\nExcel: {res.excel_path}"
+                    f"Hóa đơn: {res.invoices} | Dòng hàng hóa: {res.lines} | PDF: {res.pdfs} | Lỗi: {res.errors}\n\nExcel: {res.excel_path}"
+                    + (f"\nPDF: {res.pdf_dir}" if res.pdfs else "")
                 )
                 def finish() -> None:
                     v_status.set(msg.splitlines()[0])
@@ -455,7 +460,7 @@ def run_gui() -> None:
 
     root.protocol("WM_DELETE_WINDOW", on_close)
     append("Điền MST, mật khẩu, chọn khoảng ngày rồi bấm 'Bắt đầu tải hóa đơn'.")
-    append("Kết quả: file Excel (sheet HoaDon = bảng kê, ChiTiet = từng dòng hàng hóa/ĐVT/SL/đơn giá/thành tiền, Loi) và thư mục xml.")
+    append("Kết quả: file Excel (sheet HoaDon = bảng kê, ChiTiet = từng dòng hàng hóa/ĐVT/SL/đơn giá/thành tiền, Loi), thư mục pdf (mỗi hóa đơn một file) và thư mục xml.")
     root.mainloop()
 
 

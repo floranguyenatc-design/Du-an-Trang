@@ -74,6 +74,7 @@ def parsed_from_detail(detail: dict[str, Any]) -> ParsedInvoice:
     inv = ParsedInvoice(
         invoice_id=_s(detail, "id"),
         loai_hd=_s(detail, "tlhdon", "hdon"),
+        ten_hd=_s(detail, "thdon"),
         khmshdon=_s(detail, "khmshdon"),
         khhdon=_s(detail, "khhdon"),
         shdon=_s(detail, "shdon"),

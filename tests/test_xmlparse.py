@@ -80,3 +80,32 @@ def test_detail_tax_rate_formats():
     assert _tax_rate_text({"tsuat": 0.035}) == "3.5%"
     assert _tax_rate_text({"ltsuat": "KCT", "tsuat": 0}) == "KCT"
     assert _tax_rate_text({}) == ""
+
+
+def test_render_pdf_from_sample_xml(tmp_path):
+    from pypdf import PdfReader
+
+    from hddt.pdfrender import render_invoice_pdf
+
+    inv = parse_invoice_file(str(FIX))
+    assert inv.ten_hd == "HÓA ĐƠN GIÁ TRỊ GIA TĂNG"
+    out = render_invoice_pdf(inv, tmp_path / "a" / "hd.pdf", status_lines=["Trạng thái: Hóa đơn mới"])
+    text = "".join(pg.extract_text() for pg in PdfReader(out).pages)
+    for expected in ("HÓA ĐƠN GIÁ TRỊ GIA TĂNG", "C25TAA", "125", "CÔNG TY TNHH ABC", "0109876543",
+                     "Dịch vụ tư vấn", "Văn phòng phẩm", "2.000.000", "2.740.000", "M1-25-ABCDE-00000000001",
+                     "Hai triệu bảy trăm bốn mươi nghìn đồng", "Trạng thái: Hóa đơn mới"):
+        assert expected in text, expected
+
+
+def test_render_pdf_many_lines_spans_pages(tmp_path):
+    from pypdf import PdfReader
+
+    from hddt.pdfrender import render_invoice_pdf
+    from hddt.xmlparse import InvoiceLine, ParsedInvoice
+
+    inv = ParsedInvoice(khmshdon="1", khhdon="K24TAB", shdon="1", nb_ten="A", nm_ten="B")
+    inv.lines = [InvoiceLine(stt=str(i), ten_hang=f"Mặt hàng số {i} " * 3, dvt="Cái", so_luong=i, don_gia=1000.5, thanh_tien=1000.5 * i) for i in range(1, 121)]
+    out = render_invoice_pdf(inv, tmp_path / "long.pdf")
+    reader = PdfReader(out)
+    assert len(reader.pages) >= 3
+    assert "Mặt hàng số 120" in reader.pages[-1].extract_text() or "Mặt hàng số 120" in "".join(p.extract_text() for p in reader.pages)

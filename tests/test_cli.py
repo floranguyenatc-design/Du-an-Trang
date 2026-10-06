@@ -128,3 +128,35 @@ def test_no_xml_and_no_detail_goes_to_error_sheet(tmp_path, monkeypatch):
     wb = load_workbook(out / "HoaDon_20251201_20251231.xlsx")
     err_rows = list(wb["Loi"].iter_rows(min_row=2, values_only=True))
     assert [r[5] for r in err_rows] == ["999"]
+
+
+def test_pull_creates_pdf_per_invoice(tmp_path, monkeypatch):
+    from pypdf import PdfReader
+
+    fake = FakeGdt()
+    out = tmp_path / "out"
+    code = _run(["--env", "x", "pull", "--thang", "12/2025", "--chieu", "mua", "--thu-muc", str(out), "--khong-mtt"], fake, monkeypatch)
+    assert code == 0
+    pdf_dir = out / "pdf" / "purchase"
+    pdfs = sorted(p.name for p in pdf_dir.glob("*.pdf"))
+    assert pdfs == [
+        "purchase_query_0312345678_1_C25TAA_125.pdf",
+        "purchase_query_0312345678_1_C25TAA_126.pdf",
+        "purchase_query_0399999999_2_C25TBB_7.pdf",
+    ]
+    # Hóa đơn 126 không có XML: PDF dựng từ chi tiết GDT, có đủ dòng hàng.
+    text = "".join(pg.extract_text() for pg in PdfReader(str(pdf_dir / pdfs[1])).pages)
+    assert "Cước dịch vụ viễn thông" in text and "350.000" in text and "Tập đoàn Công nghiệp" in text
+    assert "không có file XML gốc" in text
+    wb = load_workbook(out / "HoaDon_20251201_20251231.xlsx")
+    header = [c.value for c in wb["HoaDon"][1]]
+    col = header.index("File PDF")
+    values = [r[col] for r in wb["HoaDon"].iter_rows(min_row=2, values_only=True)]
+    assert all(v and v.endswith(".pdf") for v in values)
+
+
+def test_pull_without_pdf(tmp_path, monkeypatch):
+    fake = FakeGdt()
+    out = tmp_path / "out"
+    _run(["--env", "x", "pull", "--thang", "12/2025", "--chieu", "mua", "--thu-muc", str(out), "--khong-mtt", "--khong-pdf"], fake, monkeypatch)
+    assert not (out / "pdf").exists()

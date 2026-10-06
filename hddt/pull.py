@@ -14,6 +14,7 @@ from typing import Any, Callable
 
 from .client import ApiError, FAMILIES, GdtClient, HddtError, InvoiceRef, StopRequested
 from .detail import parsed_from_detail
+from .pdfrender import render_invoice_pdf
 from .export import invoice_row, line_rows, write_workbook
 from .xmlparse import ParsedInvoice, parse_invoice_file, parse_invoice_xml
 
@@ -34,6 +35,8 @@ class PullOptions:
     # Khi GDT không có XML (hóa đơn không mã của viễn thông/ngân hàng...), lấy chi
     # tiết dòng hàng từ màn hình "Xem chi tiết" (invoices/detail) thay thế.
     detail_fallback: bool = True
+    # Tạo file PDF (bản thể hiện) cho từng hóa đơn trong thư mục pdf/.
+    make_pdf: bool = True
     workers: int = 3
     page_size: int = 50
 
@@ -42,6 +45,8 @@ class PullOptions:
 class PullResult:
     excel_path: str = ""
     xml_dir: str = ""
+    pdf_dir: str = ""
+    pdfs: int = 0
     invoices: int = 0
     lines: int = 0
     errors: int = 0
@@ -61,6 +66,28 @@ def _err(direction: str, family: str, ref: InvoiceRef | None, step: str, message
     }
 
 
+PDF_NOTE_XML = "Bản thể hiện do công cụ tạo từ file XML gốc (đã ký số) tải về từ hoadondientu.gdt.gov.vn."
+PDF_NOTE_DETAIL = (
+    "Bản thể hiện do công cụ tạo từ dữ liệu chi tiết hóa đơn trên hoadondientu.gdt.gov.vn "
+    "(cổng thuế không có file XML gốc cho hóa đơn này)."
+)
+
+
+def _status_line(ref: InvoiceRef) -> str:
+    from .client import TTHAI_LABELS, TTXLY_LABELS
+
+    parts = []
+    for key, labels, name in (("tthai", TTHAI_LABELS, "Trạng thái"), ("ttxly", TTXLY_LABELS, "Kết quả kiểm tra")):
+        v = ref.raw.get(key)
+        try:
+            label = labels.get(int(v), str(v)) if v not in (None, "") else ""
+        except (TypeError, ValueError):
+            label = str(v)
+        if label:
+            parts.append(f"{name}: {label}")
+    return " | ".join(parts)
+
+
 NO_XML_NOTE = "Không có XML gốc trên cổng thuế; chi tiết lấy từ màn hình xem hóa đơn của GDT"
 
 
@@ -75,8 +102,9 @@ def run_pull(
     client.stop_event = stop_event
     out_dir = Path(opts.output_dir)
     xml_dir = out_dir / "xml"
+    pdf_dir = out_dir / "pdf"
     out_dir.mkdir(parents=True, exist_ok=True)
-    result = PullResult(xml_dir=str(xml_dir))
+    result = PullResult(xml_dir=str(xml_dir), pdf_dir=str(pdf_dir))
 
     client.login()
     log.info(
@@ -122,11 +150,30 @@ def run_pull(
     parsed_map: dict[int, ParsedInvoice] = {}
     xml_files: dict[int, str] = {}
     xml_errors: dict[int, str] = {}
+    pdf_files: dict[int, str] = {}
 
     if opts.download_xml and refs and not stop_event.is_set():
         xml_dir.mkdir(parents=True, exist_ok=True)
 
-        def work(idx: int, ref: InvoiceRef) -> tuple[int, str | None, ParsedInvoice | None, str]:
+        def work(idx: int, ref: InvoiceRef) -> tuple[int, str | None, ParsedInvoice | None, str, str, str]:
+            idx, path, parsed, err = fetch(idx, ref)
+            pdf_path, pdf_err = "", ""
+            if parsed is not None and opts.make_pdf and not stop_event.is_set():
+                target = pdf_dir / ref.direction / f"{ref.file_stem}.pdf"
+                try:
+                    if target.is_file() and not opts.redownload:
+                        pdf_path = str(target)
+                    else:
+                        pdf_path = render_invoice_pdf(
+                            parsed, target,
+                            status_lines=[_status_line(ref)],
+                            source_note=PDF_NOTE_XML if path and path.endswith(".xml") else PDF_NOTE_DETAIL,
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    pdf_err = f"Tạo PDF lỗi: {exc}"
+            return idx, path, parsed, err, pdf_path, pdf_err
+
+        def fetch(idx: int, ref: InvoiceRef) -> tuple[int, str | None, ParsedInvoice | None, str]:
             if stop_event.is_set():
                 return idx, None, None, "Đã dừng"
             target_dir = xml_dir / ref.direction
@@ -177,8 +224,13 @@ def run_pull(
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = [pool.submit(work, i, r) for i, r in enumerate(refs)]
             for fut in as_completed(futures):
-                idx, path, parsed, err = fut.result()
+                idx, path, parsed, err, pdf_path, pdf_err = fut.result()
                 done += 1
+                if pdf_path:
+                    pdf_files[idx] = pdf_path
+                if pdf_err:
+                    errors.append(_err(refs[idx].direction, refs[idx].family, refs[idx], "Tạo PDF", pdf_err))
+                    log.warning("[PDF] %s: %s", refs[idx].label, pdf_err)
                 if path:
                     xml_files[idx] = path
                 if parsed:
@@ -195,10 +247,12 @@ def run_pull(
                 if progress:
                     progress(done, len(refs))
 
-    rows = [
-        invoice_row(r, parsed_map.get(i), os.path.relpath(xml_files[i], out_dir) if i in xml_files else "", xml_errors.get(i, ""))
-        for i, r in enumerate(refs)
-    ]
+    rows = []
+    for i, r in enumerate(refs):
+        row = invoice_row(r, parsed_map.get(i), os.path.relpath(xml_files[i], out_dir) if i in xml_files else "", xml_errors.get(i, ""))
+        if i in pdf_files:
+            row["pdf_file"] = os.path.relpath(pdf_files[i], out_dir)
+        rows.append(row)
     lines: list[dict[str, Any]] = []
     for i, r in enumerate(refs):
         if i in parsed_map:
@@ -211,6 +265,7 @@ def run_pull(
     result.excel_path = str(excel_path)
     result.invoices = len(rows)
     result.lines = len(lines)
+    result.pdfs = len(pdf_files)
     result.errors = len(errors)
     result.stopped = stop_event.is_set()
     return result

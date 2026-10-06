@@ -44,6 +44,7 @@ INVOICE_COLUMNS: list[tuple[str, str]] = [
     ("Ghi chú HĐ gốc", "gchdgoc"),
     ("Hình thức thanh toán", "htttoan"),
     ("MST TCGP", "msttcgp"),
+    ("File PDF", "pdf_file"),
     ("File XML/JSON", "xml_file"),
     ("Ghi chú tải XML", "xml_error"),
 ]

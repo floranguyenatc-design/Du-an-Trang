@@ -136,6 +136,7 @@ class InvoiceLine:
 class ParsedInvoice:
     invoice_id: str = ""
     loai_hd: str = ""
+    ten_hd: str = ""
     khmshdon: str = ""
     khhdon: str = ""
     shdon: str = ""
@@ -184,6 +185,7 @@ def parse_invoice_xml(data: bytes | str) -> ParsedInvoice:
     inv = ParsedInvoice(
         invoice_id=(dl.get("Id") if dl is not None else "") or "",
         loai_hd=hdon.get("LoaiHD", "") or "",
+        ten_hd=_text(ttchung, "THDon"),
         khmshdon=_text(ttchung, "KHMSHDon"),
         khhdon=_text(ttchung, "KHHDon"),
         shdon=_text(ttchung, "SHDon"),

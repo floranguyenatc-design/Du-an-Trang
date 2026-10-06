@@ -12,7 +12,8 @@ Thuế dùng, tự đọc CAPTCHA SVG, phân trang theo `state`, tải XML qua `
 1. Cài Python từ python.org (tick *Add Python to PATH*).
 2. Bấm đúp **`Tai-hoa-don.bat`**. Lần đầu chương trình tự cài thư viện còn thiếu.
 3. Trong cửa sổ hiện ra: điền MST, mật khẩu, chọn khoảng ngày (có nút Tháng này / Tháng trước / Quý trước / Năm nay), chọn Mua vào / Bán ra / Cả hai rồi bấm **Bắt đầu tải hóa đơn**.
-4. Xong thì bấm **Mở file Excel**. Sheet `HoaDon` là bảng kê, sheet `ChiTiet` là từng dòng hàng hóa (tên hàng, ĐVT, số lượng, đơn giá, thành tiền, thuế), sheet `Loi` là hóa đơn không tải được.
+4. Xong thì bấm **Mở file Excel**. Sheet `HoaDon` là bảng kê (có cột đường dẫn file PDF), sheet `ChiTiet` là từng dòng hàng hóa (tên hàng, ĐVT, số lượng, đơn giá, thành tiền, thuế), sheet `Loi` là hóa đơn không tải được.
+5. Thư mục `pdf` chứa **mỗi hóa đơn một file PDF** (bản thể hiện dựng từ XML gốc, hoặc từ dữ liệu chi tiết trên cổng thuế với hóa đơn không có XML). Bỏ tick **Tạo file PDF** nếu không cần.
 
 Muốn chạy bằng dòng lệnh thì dùng `cai_dat.bat`, `dang_nhap.bat`, `keo_hoa_don.bat` hoặc các lệnh bên dưới.
 
@@ -70,7 +71,8 @@ Kết quả nằm trong thư mục `output/` (đổi bằng `--thu-muc` hoặc `
 output/
   HoaDon_20251201_20251231.xlsx   # Sheet HoaDon (bảng kê), ChiTiet (dòng hàng), Loi
   danh_sach_20251201_20251231.json# JSON thô GDT trả về (để đối chiếu)
-  xml/purchase/<chieu>_<nguon>_<MST bán>_<mẫu số>_<ký hiệu>_<số>.xml (+ .html bản thể hiện)
+  pdf/purchase/<chieu>_<nguon>_<MST bán>_<mẫu số>_<ký hiệu>_<số>.pdf  # mỗi hóa đơn một PDF
+  xml/purchase/<chieu>_<nguon>_<MST bán>_<mẫu số>_<ký hiệu>_<số>.xml (+ .html; hoặc .json nếu GDT không có XML)
   xml/sold/...
 ```
 
@@ -86,6 +88,7 @@ Chạy lại cùng khoảng ngày sẽ **dùng lại XML đã có**, chỉ tải
 | `--tu-ngay / --den-ngay dd/mm/yyyy` | Khoảng ngày lập hóa đơn (tool tự chia theo tháng khi gọi GDT) |
 | `--ttxly 5\|6\|8` | Lọc kết quả kiểm tra: 5 đã cấp mã, 6 không mã, 8 máy tính tiền. Mặc định lấy tất cả |
 | `--luong N` | Số luồng tải XML song song (1–10) |
+| `--khong-pdf` | Không tạo file PDF cho từng hóa đơn |
 | `--token ...` | Dùng token sẵn, bỏ qua đăng nhập |
 | `-v` / `--log-file` | Log chi tiết / ghi log ra file |
 
@@ -131,6 +134,12 @@ Bộ test chạy hoàn toàn offline với server GDT giả lập (đăng nhập
 tải XML, hết hạn token, 429, xuất Excel).
 
 ## Lưu ý
+
+- Cổng thuế không cung cấp file PDF. PDF do tool dựng từ dữ liệu hóa đơn tải về
+  (XML gốc đã ký số, hoặc dữ liệu chi tiết trên cổng thuế), nên bố cục khác mẫu riêng
+  của từng nhà cung cấp hóa đơn nhưng đủ thông tin pháp lý: người bán, người mua,
+  dòng hàng, thuế, tổng tiền, mã CQT, ngày ký. Cần font có dấu tiếng Việt
+  (Windows có sẵn Arial).
 
 - Tool chỉ dùng tài khoản của chính đơn vị, dữ liệu tải về là dữ liệu đơn vị được
   phép tra cứu trên cổng của Tổng cục Thuế. Không chia sẻ file `.env`, token hay log.

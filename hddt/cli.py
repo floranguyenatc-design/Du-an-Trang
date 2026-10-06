@@ -159,6 +159,8 @@ def cmd_pull(args: argparse.Namespace, settings: Settings) -> int:
         download_xml=not args.khong_xml,
         redownload=args.tai_lai,
         make_pdf=not args.khong_pdf,
+        export_misa=args.misa,
+        misa_settings=settings.misa_settings(),
         workers=args.luong or settings.xml_workers,
         page_size=settings.page_size,
     )
@@ -169,6 +171,8 @@ def cmd_pull(args: argparse.Namespace, settings: Settings) -> int:
         print(f"XML   : {res.xml_dir}")
     if res.pdfs:
         print(f"PDF   : {res.pdf_dir} ({res.pdfs} file)")
+    if res.misa_folder:
+        print(f"MISA  : {res.misa_folder}" + (f" (LỖI: {res.misa_error})" if res.misa_error else f" ({res.misa_vouchers} chứng từ)"))
     return 0 if not res.errors else 2
 
 
@@ -266,6 +270,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--khong-xml", action="store_true", help="Chỉ lấy danh sách, không tải XML")
     s.add_argument("--tai-lai", action="store_true", help="Tải lại XML (và tạo lại PDF) dù đã có file")
     s.add_argument("--khong-pdf", action="store_true", help="Không tạo file PDF cho từng hóa đơn")
+    s.add_argument("--misa", action="store_true", help="Kéo xong thì tạo luôn thư mục misa (file nhập khẩu MISA SME)")
     s.add_argument("--luong", type=int, help="Số luồng tải XML song song (1-10, mặc định XML_WORKERS=3)")
     s.set_defaults(func=cmd_pull)
 

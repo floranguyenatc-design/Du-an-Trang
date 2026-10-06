@@ -37,6 +37,9 @@ class PullOptions:
     detail_fallback: bool = True
     # Tạo file PDF (bản thể hiện) cho từng hóa đơn trong thư mục pdf/.
     make_pdf: bool = True
+    # Sau khi kéo xong, tạo luôn thư mục misa (file nhập khẩu MISA SME) từ hóa đơn mua vào.
+    export_misa: bool = False
+    misa_settings: Any = None
     workers: int = 3
     page_size: int = 50
 
@@ -51,6 +54,9 @@ class PullResult:
     lines: int = 0
     errors: int = 0
     stopped: bool = False
+    misa_folder: str = ""
+    misa_vouchers: int = 0
+    misa_error: str = ""
 
 
 def _err(direction: str, family: str, ref: InvoiceRef | None, step: str, message: str) -> dict[str, Any]:
@@ -268,4 +274,16 @@ def run_pull(
     result.pdfs = len(pdf_files)
     result.errors = len(errors)
     result.stopped = stop_event.is_set()
+
+    if opts.export_misa and "purchase" in opts.directions and not result.stopped:
+        from .misa import export_misa, write_misa_error
+
+        try:
+            mres = export_misa(out_dir, opts.misa_settings)
+            result.misa_folder = mres.folder
+            result.misa_vouchers = mres.vouchers
+        except Exception as exc:  # noqa: BLE001
+            result.misa_error = str(exc) or type(exc).__name__
+            result.misa_folder = write_misa_error(out_dir, exc)
+            log.error("[MISA] Không tạo được file nhập MISA: %s", result.misa_error)
     return result

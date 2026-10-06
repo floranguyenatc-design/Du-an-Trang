@@ -69,7 +69,7 @@ def test_export_misa(tmp_path):
     so_ct = {r["Số hóa đơn"]: r["Số chứng từ (*)"] for r in rows}
     assert len(set(so_ct.values())) == 3 and all(len(v) <= 20 for v in so_ct.values())
     for r in rows:
-        assert r["Hình thức mua hàng"] == "0" and r["Phương thức thanh toán"] == "0" and r["Nhận kèm hóa đơn"] == "1"
+        assert r["Hình thức mua hàng"] == 0 and r["Phương thức thanh toán"] == 0 and r["Nhận kèm hóa đơn"] == 1
         assert r["TK chi phí (*)"] == "6422" and r["TK công nợ/TK tiền (*)"] == "331"
         assert isinstance(r["Ngày hạch toán (*)"], datetime) and r["Ngày hạch toán (*)"] == r["Ngày hóa đơn"]
         assert r["Mã hàng (*)"] and r["Mã nhà cung cấp"]
@@ -117,7 +117,7 @@ def test_payment_method_changes_counter_account(tmp_path):
     out = _setup(tmp_path)
     res = export_misa(out, MisaSettings(phuong_thuc_tt="1"))
     ws = load_workbook(res.excel_path).active
-    assert ws["C2"].value == "1" and ws["S2"].value == "1111"
+    assert ws["C2"].value == 1 and ws["S2"].value == "1111"
 
 
 def test_misa_vat_rate():
@@ -158,3 +158,20 @@ def test_export_misa_empty_dir(tmp_path):
     from hddt import cli
 
     assert cli.main(["--env", "x", "misa", "--thu-muc", str(tmp_path)]) == 1
+
+
+def test_output_matches_original_template_layout(tmp_path):
+    """Tiêu đề, độ rộng cột, font của file xuất khớp mẫu MISA gốc chị gửi."""
+    from openpyxl.utils import get_column_letter
+
+    from hddt.misa import MISA_COLUMNS
+
+    res = export_misa(_setup(tmp_path))
+    ws = load_workbook(res.excel_path).active
+    # độ rộng cột (ký tự) đọc từ mẫu .xls gốc
+    expected_width = {"A": 16.0, "D": 23.57, "G": 21.43, "P": 23.29, "AB": 35.71}
+    for col, w in expected_width.items():
+        assert abs(ws.column_dimensions[col].width - w) < 0.6, col
+    for i, (col, head) in enumerate(MISA_COLUMNS, start=1):
+        assert get_column_letter(i) == col and ws[f"{col}1"].value == head
+        assert ws[f"{col}1"].font.name == "Times New Roman" and ws[f"{col}1"].font.b

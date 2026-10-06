@@ -118,6 +118,7 @@ def build_options(form: dict):
         download_xml=bool(form.get("download_xml", True)),
         redownload=bool(form.get("redownload", False)),
         make_pdf=bool(form.get("make_pdf", True)),
+        export_misa=bool(form.get("export_misa", False)),
         workers=int(form.get("workers") or 3),
     )
 
@@ -147,7 +148,9 @@ def run_gui() -> None:
     m_first, m_last = month_bounds(today)
 
     root = tk.Tk()
-    root.title("Tải hóa đơn điện tử từ Cơ quan Thuế")
+    from hddt import __version__
+
+    root.title(f"Tải hóa đơn điện tử từ Cơ quan Thuế - phiên bản {__version__}")
     root.minsize(760, 620)
     try:
         root.iconbitmap(default="")
@@ -213,14 +216,20 @@ def run_gui() -> None:
     v_xml = tk.BooleanVar(value=True)
     v_redo = tk.BooleanVar(value=False)
     v_pdf = tk.BooleanVar(value=True)
+    v_misa = tk.BooleanVar(value=True)
     v_remember = tk.BooleanVar(value=True)
     opt_frame = ttk.Frame(frm)
     opt_frame.grid(row=4, column=1, columnspan=4, sticky="w", **pad)
-    ttk.Checkbutton(opt_frame, text="Gồm hóa đơn máy tính tiền", variable=v_sco).pack(side="left", padx=4)
-    ttk.Checkbutton(opt_frame, text="Tải XML gốc (lấy chi tiết hàng hóa)", variable=v_xml).pack(side="left", padx=4)
-    ttk.Checkbutton(opt_frame, text="Tạo file PDF", variable=v_pdf).pack(side="left", padx=4)
-    ttk.Checkbutton(opt_frame, text="Tải lại XML đã có", variable=v_redo).pack(side="left", padx=4)
-    ttk.Checkbutton(opt_frame, text="Ghi nhớ mật khẩu", variable=v_remember).pack(side="left", padx=4)
+    line1 = ttk.Frame(opt_frame)
+    line1.pack(anchor="w")
+    line2 = ttk.Frame(opt_frame)
+    line2.pack(anchor="w", pady=(2, 0))
+    ttk.Checkbutton(line1, text="Gồm hóa đơn máy tính tiền", variable=v_sco).pack(side="left", padx=4)
+    ttk.Checkbutton(line1, text="Tải XML gốc (lấy chi tiết hàng hóa)", variable=v_xml).pack(side="left", padx=4)
+    ttk.Checkbutton(line1, text="Tạo file PDF", variable=v_pdf).pack(side="left", padx=4)
+    ttk.Checkbutton(line2, text="Tạo file nhập MISA", variable=v_misa).pack(side="left", padx=4)
+    ttk.Checkbutton(line2, text="Tải lại XML đã có", variable=v_redo).pack(side="left", padx=4)
+    ttk.Checkbutton(line2, text="Ghi nhớ mật khẩu", variable=v_remember).pack(side="left", padx=4)
 
     # --- thư mục kết quả
     ttk.Label(frm, text="Thư mục kết quả:").grid(row=5, column=0, sticky="e", **pad)
@@ -310,6 +319,7 @@ def run_gui() -> None:
             "download_xml": v_xml.get(),
             "redownload": v_redo.get(),
             "make_pdf": v_pdf.get() and v_xml.get(),
+            "export_misa": v_misa.get() and v_xml.get(),
             "output_dir": v_out.get(),
             "workers": 3,
         }
@@ -384,6 +394,10 @@ def run_gui() -> None:
             messagebox.showwarning("Kiểm tra lại", str(exc))
             return
         persist()
+        if opts.export_misa:
+            from hddt.config import Settings
+
+            opts.misa_settings = Settings.from_env(str(ENV_FILE)).misa_settings()
         attach_file_log(opts.output_dir)
         state["stop"] = threading.Event()
         state["excel"] = ""
@@ -404,6 +418,11 @@ def run_gui() -> None:
                     f"{'ĐÃ DỪNG. ' if res.stopped else 'XONG. '}"
                     f"Hóa đơn: {res.invoices} | Dòng hàng hóa: {res.lines} | PDF: {res.pdfs} | Lỗi: {res.errors}\n\nExcel: {res.excel_path}"
                     + (f"\nPDF: {res.pdf_dir}" if res.pdfs else "")
+                    + (
+                        f"\nMISA: {res.misa_folder} ({res.misa_vouchers} chứng từ, file Mua_hang_khong_qua_kho_VND.xlsx)"
+                        if res.misa_folder and not res.misa_error else ""
+                    )
+                    + (f"\n\nKHÔNG tạo được file MISA: {res.misa_error}\nXem file LOI_XUAT_MISA.txt trong thư mục misa." if res.misa_error else "")
                 )
                 def finish() -> None:
                     v_status.set(msg.splitlines()[0])

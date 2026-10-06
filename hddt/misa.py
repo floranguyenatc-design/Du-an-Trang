@@ -296,6 +296,21 @@ def _fill_template(path: Path, rows: list[dict[str, Any]]) -> None:
     wb.save(path)
 
 
+def write_misa_error(output_dir: str | Path, exc: BaseException) -> str:
+    """Ghi lỗi vào misa/LOI_XUAT_MISA.txt để người dùng thấy lý do ngay trong thư mục misa."""
+    import traceback
+
+    misa_dir = Path(output_dir) / "misa"
+    misa_dir.mkdir(parents=True, exist_ok=True)
+    text = (
+        f"{datetime.now():%d/%m/%Y %H:%M:%S} - Không tạo được file nhập MISA.\n"
+        f"Lý do: {exc}\n\nChi tiết kỹ thuật (gửi cho người hỗ trợ):\n"
+        + "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    )
+    (misa_dir / "LOI_XUAT_MISA.txt").write_text(text, encoding="utf-8")
+    return str(misa_dir)
+
+
 def export_misa(output_dir: str | Path, settings: MisaSettings | None = None) -> MisaResult:
     s = settings or MisaSettings()
     out_dir = Path(output_dir)
@@ -357,7 +372,7 @@ def export_misa(output_dir: str | Path, settings: MisaSettings | None = None) ->
             notes.append(TTHAI_LABELS.get(tthai, "") + " - kiểm tra lại trước khi hạch toán")
 
         header = {
-            "B": "0", "C": pay, "D": "1",
+            "B": 0, "C": int(pay), "D": 1,
             "E": inv.ngay_lap, "F": inv.ngay_lap, "G": so_ct,
             "H": inv.khmshdon, "I": inv.khhdon, "J": inv.shdon, "K": inv.ngay_lap,
             "L": ma_ncc, "M": inv.nb_ten,
@@ -438,9 +453,9 @@ def export_misa(output_dir: str | Path, settings: MisaSettings | None = None) ->
     guide.column_dimensions["A"].width = 120
     res.catalog_path = str(misa_dir / "MISA_DanhMuc_va_KiemTra.xlsx")
     wb.save(res.catalog_path)
-    old = misa_dir / "MISA_NhapKhau_MuaHang.xlsx"  # tên file của bản trước
-    if old.exists():
-        old.unlink()
+    for old in (misa_dir / "MISA_NhapKhau_MuaHang.xlsx", misa_dir / "LOI_XUAT_MISA.txt"):  # file cũ
+        if old.exists():
+            old.unlink()
 
     res.skipped = len(skipped)
     res.suppliers = len(suppliers)

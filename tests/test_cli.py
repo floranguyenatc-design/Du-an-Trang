@@ -160,3 +160,34 @@ def test_pull_without_pdf(tmp_path, monkeypatch):
     out = tmp_path / "out"
     _run(["--env", "x", "pull", "--thang", "12/2025", "--chieu", "mua", "--thu-muc", str(out), "--khong-mtt", "--khong-pdf"], fake, monkeypatch)
     assert not (out / "pdf").exists()
+
+
+def test_pull_with_misa_creates_misa_folder(tmp_path, monkeypatch):
+    fake = FakeGdt()
+    out = tmp_path / "out"
+    code = _run(["--env", "x", "pull", "--thang", "12/2025", "--chieu", "mua", "--thu-muc", str(out), "--misa"], fake, monkeypatch)
+    assert code == 0
+    assert (out / "misa" / "Mua_hang_khong_qua_kho_VND.xlsx").is_file()
+    assert (out / "misa" / "MISA_DanhMuc_va_KiemTra.xlsx").is_file()
+    assert not (out / "misa" / "LOI_XUAT_MISA.txt").exists()
+
+
+def test_misa_error_file_written(tmp_path, monkeypatch):
+    from hddt import misa
+    from hddt.pull import PullOptions, run_pull
+    from hddt.client import GdtClient
+    from datetime import date
+
+    def boom(*a, **k):
+        raise RuntimeError("thử lỗi")
+
+    monkeypatch.setattr(misa, "export_misa", boom)
+    fake = FakeGdt()
+    session = mock.Mock(spec=RealSession)
+    session.request.side_effect = fake.request
+    session.proxies = {}
+    client = GdtClient("0109876543", "secret", session=session, request_interval=0, sleep=lambda s: None)
+    res = run_pull(client, PullOptions(start=date(2025, 12, 1), end=date(2025, 12, 31), directions=["purchase"],
+                                       families=["query"], output_dir=str(tmp_path / "o"), export_misa=True, make_pdf=False))
+    assert res.misa_error == "thử lỗi"
+    assert "thử lỗi" in (tmp_path / "o" / "misa" / "LOI_XUAT_MISA.txt").read_text(encoding="utf-8")

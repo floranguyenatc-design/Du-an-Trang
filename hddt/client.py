@@ -452,7 +452,7 @@ class GdtClient:
                 pages += 1
                 url = (
                     f"{API_URL}/{family}/invoices/{direction}"
-                    f"?sort=tdlap%3Adesc%2Ckhmshdon%3Aasc%2Cshdon%3Adesc&size={page_size}&search={quote(search)}"
+                    f"?sort=tdlap%3Adesc&size={page_size}&search={quote(search)}"
                 )
                 if state:
                     url += "&state=" + quote(state)
@@ -528,7 +528,7 @@ class GdtClient:
         endpoint = "export-excel" if direction == "purchase" else "export-excel-sold"
         url = (
             f"{API_URL}/{family}/invoices/{endpoint}"
-            f"?sort=tdlap%3Adesc%2Ckhmshdon%3Aasc%2Cshdon%3Adesc&search={quote(search)}"
+            f"?sort=tdlap%3Adesc&search={quote(search)}"
         )
         if direction == "sold":
             url += "&type=purchase"

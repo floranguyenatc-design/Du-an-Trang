@@ -7,6 +7,14 @@ hóa đơn **mua vào / bán ra** (cả hóa đơn thường và hóa đơn **m�
 Cách làm giống các tool tải hóa đơn đang lưu hành (gọi thẳng API mà web của Tổng cục
 Thuế dùng, tự đọc CAPTCHA SVG, phân trang theo `state`, tải XML qua `export-xml`).
 
+## 0. Cách nhanh nhất trên Windows
+
+1. Cài Python từ python.org (tick *Add Python to PATH*).
+2. Bấm đúp `cai_dat.bat` (cài thư viện, tạo sẵn file `.env`).
+3. Mở `.env` bằng Notepad, điền `GDT_USERNAME`, `GDT_PASSWORD`.
+4. Bấm đúp `dang_nhap.bat` để kiểm tra đăng nhập.
+5. Bấm đúp `keo_hoa_don.bat`, nhập tháng (vd `09/2026`). Kết quả trong thư mục `output`.
+
 ## 1. Cài đặt
 
 Cần Python 3.9 trở lên (Windows: tải tại python.org, nhớ tick *Add Python to PATH*).

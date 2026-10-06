@@ -1,19 +1,19 @@
-"""Chuẩn bị dữ liệu hóa đơn đã kéo về để đưa vào phần mềm kế toán MISA SME.
+"""Chuẩn bị dữ liệu hóa đơn mua vào đã kéo về để nhập vào phần mềm MISA SME.
 
-MISA SME có hai cách nhận hóa đơn mua vào, tool chuẩn bị sẵn cho cả hai:
+Kết quả trong thư mục ``misa``:
 
-1. Đọc trực tiếp file XML hóa đơn điện tử (Mua hàng > Lập chứng từ từ hóa đơn điện tử).
-   Tool gom các XML mua vào hợp lệ vào một thư mục phẳng ``misa/xml_mua_vao`` để chọn
-   nhiều file một lần.
-2. Nhập từ Excel (Mua hàng > Thêm chứng từ mua hàng > Nhập từ excel). Bước "Ghép dữ liệu"
-   của MISA cho chọn cột tương ứng; tên cột ở đây đặt theo tên trường trên màn hình
-   chứng từ mua hàng của MISA để ghép tự động được nhiều nhất. Cách này dùng được cả
-   cho hóa đơn không có XML gốc (dữ liệu chi tiết lấy từ cổng thuế).
+- ``Mua_hang_khong_qua_kho_VND.xlsx``: điền đúng mẫu nhập khẩu "Chứng từ mua hàng không
+  qua kho" (VND) của MISA SME.NET, giữ nguyên 39 cột, thứ tự cột và ghi chú gợi ý của
+  MISA. Mỗi dòng hàng hóa một dòng; các dòng cùng "Số chứng từ" là một chứng từ.
+  Các cột mã hóa theo quy định của mẫu: Hình thức mua hàng 0 = trong nước, Phương thức
+  thanh toán 0 = chưa thanh toán, Nhận kèm hóa đơn 1 = có, % thuế GTGT 0/5/8/10/KCT/
+  KKKNT/KHAC (KHAC kèm Tỷ lệ tính thuế).
+- ``MISA_DanhMuc_va_KiemTra.xlsx``: danh mục Nhà cung cấp, Vật tư hàng hóa (mã NCC và mã
+  hàng phải có trong MISA trước khi nhập chứng từ), sheet KiemTra đối chiếu tổng dòng
+  hàng với tổng hóa đơn và ghi chú cần xem lại, sheet BoQua.
+- ``xml_mua_vao``: XML gốc để dùng chức năng đọc hóa đơn điện tử của MISA (tùy chọn).
 
-Kèm theo là danh mục Nhà cung cấp và Vật tư hàng hóa để nhập trước, vì chứng từ cần
-mã NCC và mã hàng đã có trong danh mục.
-
-Hóa đơn bị hủy (tthai 6) và bị thay thế (tthai 4) không đưa vào; liệt kê ở sheet BoQua.
+Hóa đơn bị hủy (tthai 6) và bị thay thế (tthai 4) không đưa vào.
 """
 
 from __future__ import annotations
@@ -46,36 +46,31 @@ HEADER_FONT = Font(bold=True, color="FFFFFF")
 # Trạng thái không hạch toán: 4 = bị thay thế, 6 = bị hủy.
 SKIP_TTHAI = {4: "Hóa đơn đã bị thay thế (hạch toán theo hóa đơn thay thế)", 6: "Hóa đơn đã bị hủy"}
 
-VOUCHER_COLUMNS: list[tuple[str, str, bool]] = [
-    # (tên cột, khóa, bắt buộc)
-    ("Ngày hạch toán", "ngay_ht", True),
-    ("Ngày chứng từ", "ngay_ct", True),
-    ("Số chứng từ", "so_ct", True),
-    ("Mẫu số HĐ", "mau_so", False),
-    ("Ký hiệu HĐ", "ky_hieu", False),
-    ("Số hóa đơn", "so_hd", False),
-    ("Ngày hóa đơn", "ngay_hd", False),
-    ("Mã nhà cung cấp", "ma_ncc", True),
-    ("Tên nhà cung cấp", "ten_ncc", False),
-    ("Địa chỉ", "dia_chi", False),
-    ("Mã số thuế", "mst", False),
-    ("Diễn giải", "dien_giai", False),
-    ("Mã hàng", "ma_hang", True),
-    ("Tên hàng", "ten_hang", False),
-    ("TK kho/TK chi phí", "tk_no", True),
-    ("TK công nợ", "tk_co", True),
-    ("ĐVT", "dvt", False),
-    ("Số lượng", "so_luong", False),
-    ("Đơn giá", "don_gia", False),
-    ("Thành tiền", "thanh_tien", True),
-    ("Tỷ lệ CK (%)", "tl_ck", False),
-    ("Tiền chiết khấu", "tien_ck", False),
-    ("% thuế GTGT", "thue_suat", False),
-    ("Tiền thuế GTGT", "tien_thue", False),
-    ("TK thuế GTGT", "tk_thue", False),
-    ("Nhóm HHDV mua vào", "nhom_hhdv", False),
-    ("Ghi chú (tool)", "ghi_chu", False),
+TEMPLATE_PATH = Path(__file__).parent / "templates" / "misa_mua_hang_khong_qua_kho_vnd.xlsx"
+TEMPLATE_OUT_NAME = "Mua_hang_khong_qua_kho_VND.xlsx"
+
+# Cột của mẫu MISA "Chứng từ mua hàng không qua kho" (đúng thứ tự A..AM).
+MISA_COLUMNS: list[tuple[str, str]] = [
+    ("A", "Hiển thị trên sổ"), ("B", "Hình thức mua hàng"), ("C", "Phương thức thanh toán"),
+    ("D", "Nhận kèm hóa đơn"), ("E", "Ngày hạch toán (*)"), ("F", "Ngày chứng từ (*)"),
+    ("G", "Số chứng từ (*)"), ("H", "Mẫu số HĐ"), ("I", "Ký hiệu HĐ"), ("J", "Số hóa đơn"),
+    ("K", "Ngày hóa đơn"), ("L", "Mã nhà cung cấp"), ("M", "Tên nhà cung cấp"), ("N", "Diễn giải"),
+    ("O", "NV mua hàng"), ("P", "Mã hàng (*)"), ("Q", "Tên hàng"), ("R", "TK chi phí (*)"),
+    ("S", "TK công nợ/TK tiền (*)"), ("T", "ĐVT"), ("U", "Số lượng"), ("V", "Đơn giá"),
+    ("W", "Thành tiền"), ("X", "Tỷ lệ CK"), ("Y", "Tiền chiết khấu"), ("Z", "Chi phí mua hàng"),
+    ("AA", "% thuế GTGT"), ("AB", "Tỷ lệ tính thuế (Thuế suất KHAC)"), ("AC", "Tiền thuế GTGT"),
+    ("AD", "TKĐƯ thuế GTGT"), ("AE", "TK thuế GTGT"), ("AF", "Nhóm HHDV mua vào"),
+    ("AG", "Giá tính thuế NK"), ("AH", "% thuế NK"), ("AI", "Tiền thuế NK"), ("AJ", "TK thuế NK"),
+    ("AK", "% thuế TTĐB"), ("AL", "Tiền thuế TTĐB"), ("AM", "TK thuế TTĐB"),
 ]
+DATE_COLS = ("E", "F", "K")
+TEXT_COLS = ("G", "H", "I", "J", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "AA", "AD", "AE", "AF")
+NUM_COLS = ("U", "V", "W", "X", "Y", "AB", "AC")
+# Giới hạn độ dài theo ghi chú của mẫu MISA.
+MAX_LEN = {"G": 20, "H": 25, "I": 20, "J": 25, "M": 128, "N": 255, "Q": 255, "R": 20, "S": 25}
+
+# Phương thức thanh toán (cột C) -> tài khoản đối ứng mặc định (cột S).
+PAYMENT_ACCOUNT = {"0": None, "1": "1111", "2": "1121", "3": "1121", "4": "1121"}
 
 SUPPLIER_COLUMNS: list[tuple[str, str, bool]] = [
     ("Mã nhà cung cấp", "ma", True),
@@ -104,14 +99,16 @@ class MisaSettings:
     tk_chi_phi: str = "642"
     tk_cong_no: str = "331"
     tk_thue: str = "1331"
-    nhom_hhdv: str = "1"  # 1 = HHDV dùng riêng cho SXKD chịu thuế GTGT
+    nhom_hhdv: str = "1"  # mã nhóm HHDV mua vào trong danh mục MISA
+    phuong_thuc_tt: str = "0"  # 0 chưa thanh toán, 1 tiền mặt, 2 ủy nhiệm chi, 3 séc CK, 4 séc TM
     so_ct_prefix: str = "MH"
 
 
 @dataclass
 class MisaResult:
     folder: str = ""
-    excel_path: str = ""
+    excel_path: str = ""  # file theo mẫu MISA
+    catalog_path: str = ""  # danh mục + kiểm tra
     xml_dir: str = ""
     vouchers: int = 0
     lines: int = 0
@@ -121,6 +118,42 @@ class MisaResult:
     suppliers: int = 0
     items: int = 0
     warnings: list[str] = field(default_factory=list)
+
+
+def misa_vat_rate(text: str) -> tuple[str, float | None]:
+    """Chuyển thuế suất trên hóa đơn sang mã cột "% thuế GTGT" của MISA.
+
+    Trả về (mã, tỷ lệ cho thuế suất KHAC). Mã hợp lệ: 0, 5, 8, 10, KCT, KKKNT, KHAC.
+    """
+    t = (text or "").strip().upper().replace(" ", "")
+    if not t:
+        return "", None
+    if t in ("KCT", "KKKNT"):
+        return t, None
+    if t.startswith("KHAC"):
+        m = re.search(r"(\d+(?:[.,]\d+)?)", t)
+        return "KHAC", (float(m.group(1).replace(",", ".")) if m else None)
+    m = re.fullmatch(r"(\d+(?:[.,]\d+)?)%?", t)
+    if not m:
+        return "", None
+    v = float(m.group(1).replace(",", "."))
+    if 0 < v < 1 and "%" not in t:
+        v *= 100
+    if v in (0, 5, 8, 10):
+        return str(int(v)), None
+    return "KHAC", v
+
+
+def _vnd(v: float | None, decimals: int = 0) -> float | int | None:
+    if v is None:
+        return None
+    r = round(v, decimals)
+    return int(r) if float(r).is_integer() else r
+
+
+def _cut(text: str, n: int) -> str:
+    text = text or ""
+    return text if len(text) <= n else text[: n - 1] + "…"
 
 
 def _ascii_slug(text: str) -> str:
@@ -228,16 +261,39 @@ def _write(ws, columns: list[tuple[str, str, bool]], rows: list[dict[str, Any]])
     ws.freeze_panes = "A2"
     for i, (name, key, _) in enumerate(columns, start=1):
         letter = get_column_letter(i)
-        ws.column_dimensions[letter].width = 40 if key in ("ten_ncc", "ten_hang", "dia_chi", "dien_giai", "ten", "ghi_chu") else max(11, len(name) + 3)
+        ws.column_dimensions[letter].width = 45 if key in ("hd", "dia_chi", "ten", "ghi_chu", "ly_do") else max(11, len(name) + 3)
         if key.startswith("ngay"):
             for (c,) in ws.iter_rows(min_row=2, min_col=i, max_col=i):
                 c.number_format = "dd/mm/yyyy"
-        if key in ("don_gia", "thanh_tien", "tien_thue", "tien_ck"):
+        if key in ("tt_dong", "tt_hd", "lech_tt", "thue_dong", "thue_hd", "lech_thue", "tong_tt"):
             for (c,) in ws.iter_rows(min_row=2, min_col=i, max_col=i):
                 c.number_format = "#,##0.##"
         if key in ("ma_ncc", "mst", "ma", "so_ct", "so_hd", "mau_so", "tk_no", "tk_co", "tk_thue", "ma_hang"):
             for (c,) in ws.iter_rows(min_row=2, min_col=i, max_col=i):
                 c.number_format = "@"
+
+
+def _fill_template(path: Path, rows: list[dict[str, Any]]) -> None:
+    from openpyxl import load_workbook
+
+    wb = load_workbook(TEMPLATE_PATH)
+    ws = wb.active
+    for i, row in enumerate(rows, start=2):
+        for col, _ in MISA_COLUMNS:
+            v = row.get(col)
+            if v in (None, ""):
+                continue
+            if col in MAX_LEN and isinstance(v, str):
+                v = _cut(v, MAX_LEN[col])
+            cell = ws[f"{col}{i}"]
+            cell.value = v
+            if col in DATE_COLS:
+                cell.number_format = "dd/mm/yyyy"
+            elif col in TEXT_COLS:
+                cell.number_format = "@"
+            elif col in NUM_COLS:
+                cell.number_format = "#,##0.####"
+    wb.save(path)
 
 
 def export_misa(output_dir: str | Path, settings: MisaSettings | None = None) -> MisaResult:
@@ -258,9 +314,13 @@ def export_misa(output_dir: str | Path, settings: MisaSettings | None = None) ->
         )
     invoices.sort(key=lambda t: (t[2].ngay_lap or datetime.min, t[2].nb_mst, t[2].khhdon, t[2].shdon))
 
+    pay = s.phuong_thuc_tt if s.phuong_thuc_tt in PAYMENT_ACCOUNT else "0"
+    tk_doi_ung = PAYMENT_ACCOUNT[pay] or s.tk_cong_no
+
     catalog = ItemCatalog()
     suppliers: dict[str, dict[str, Any]] = {}
-    vouchers: list[dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
+    checks: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
     used_so_ct: set[str] = set()
 
@@ -281,124 +341,163 @@ def export_misa(output_dir: str | Path, settings: MisaSettings | None = None) ->
             "dien_thoai": inv.nb_sdt, "stk": inv.nb_stk, "loai": "Tổ chức",
         })
 
-        so_ct = f"{s.so_ct_prefix}{_ascii_slug(inv.khhdon)}{inv.shdon}"[:20]
+        base_ct = f"{s.so_ct_prefix}{_ascii_slug(inv.khhdon)}{inv.shdon}"
+        so_ct = base_ct[:20]
         n = 1
         while so_ct in used_so_ct:
             n += 1
-            so_ct = f"{s.so_ct_prefix}{_ascii_slug(inv.khhdon)}{inv.shdon}"[:18] + f"_{n}"
+            so_ct = base_ct[: 20 - len(str(n)) - 1] + f"_{n}"
         used_so_ct.add(so_ct)
 
-        note_parts = []
+        notes = []
         if not has_xml:
-            note_parts.append("Không có XML gốc; số liệu lấy từ chi tiết trên cổng thuế")
+            notes.append("Không có XML gốc; số liệu lấy từ chi tiết trên cổng thuế")
             res.no_xml += 1
         if tthai in (2, 3, 5):
-            note_parts.append(TTHAI_LABELS.get(tthai, "") + " - kiểm tra lại trước khi hạch toán")
-        note = "; ".join(p for p in note_parts if p)
+            notes.append(TTHAI_LABELS.get(tthai, "") + " - kiểm tra lại trước khi hạch toán")
 
         header = {
-            "ngay_ht": inv.ngay_lap, "ngay_ct": inv.ngay_lap, "so_ct": so_ct,
-            "mau_so": inv.khmshdon, "ky_hieu": inv.khhdon, "so_hd": inv.shdon, "ngay_hd": inv.ngay_lap,
-            "ma_ncc": ma_ncc, "ten_ncc": inv.nb_ten, "dia_chi": inv.nb_dchi, "mst": inv.nb_mst,
-            "dien_giai": f"Mua hàng của {inv.nb_ten} theo HĐ {inv.khhdon} số {inv.shdon}",
-            "tk_no": s.tk_chi_phi, "tk_co": s.tk_cong_no, "tk_thue": s.tk_thue, "nhom_hhdv": s.nhom_hhdv,
-            "ghi_chu": note,
+            "B": "0", "C": pay, "D": "1",
+            "E": inv.ngay_lap, "F": inv.ngay_lap, "G": so_ct,
+            "H": inv.khmshdon, "I": inv.khhdon, "J": inv.shdon, "K": inv.ngay_lap,
+            "L": ma_ncc, "M": inv.nb_ten,
+            "N": f"Mua hàng của {inv.nb_ten} theo HĐ {inv.khhdon} số {inv.shdon}",
+            "R": s.tk_chi_phi, "S": tk_doi_ung,
         }
 
+        def add_line(ma: str, ten: str, dvt: str, sl, dg, tt, tl_ck, tien_ck, ts_text: str, thue) -> None:
+            code, khac = misa_vat_rate(ts_text)
+            row = {
+                **header, "P": ma, "Q": ten, "T": dvt,
+                "U": _vnd(sl, 4), "V": _vnd(dg, 4), "W": _vnd(tt, 2),
+                "X": _vnd(tl_ck, 4) if tl_ck else None, "Y": _vnd(tien_ck, 2) if tien_ck else None,
+                "AA": code, "AB": _vnd(khac, 4) if code == "KHAC" else None,
+                "AC": _vnd(thue, 2),
+            }
+            if code not in ("", "KCT", "KKKNT"):
+                row["AE"] = s.tk_thue
+                row["AF"] = s.nhom_hhdv
+            rows.append(row)
+
         lines = [ln for ln in inv.lines if ln.tchat != "4" and (ln.ten_hang or ln.thanh_tien)]
+        sum_tt = 0.0
+        sum_thue = 0.0
         if not lines:
-            ma = catalog.code_for("", "Hàng hóa, dịch vụ theo hóa đơn", "", "", s)
-            vouchers.append({
-                **header, "ma_hang": ma, "ten_hang": "Hàng hóa, dịch vụ theo hóa đơn",
-                "thanh_tien": inv.tong_tien_chua_thue, "tien_thue": inv.tong_tien_thue,
-                "thue_suat": (inv.thue_theo_suat[0]["thue_suat"] if len(inv.thue_theo_suat) == 1 else ""),
-                "ghi_chu": "; ".join(p for p in (note, "Hóa đơn không có dòng hàng chi tiết; ghi theo tổng tiền") if p),
-            })
+            ts = inv.thue_theo_suat[0]["thue_suat"] if len(inv.thue_theo_suat) == 1 else ""
+            ma = catalog.code_for("", "Hàng hóa, dịch vụ theo hóa đơn", "", ts, s)
+            add_line(ma, "Hàng hóa, dịch vụ theo hóa đơn", "", None, None, inv.tong_tien_chua_thue, None, None, ts, inv.tong_tien_thue)
+            notes.append("Không có dòng hàng chi tiết; ghi 1 dòng theo tổng tiền hóa đơn")
+            sum_tt += inv.tong_tien_chua_thue or 0
+            sum_thue += inv.tong_tien_thue or 0
             res.lines += 1
         for ln in lines:
             ma = catalog.code_for(ln.ma_hang, ln.ten_hang, ln.dvt, ln.thue_suat, s)
             sign = -1 if ln.tchat == "3" else 1  # chiết khấu thương mại ghi giảm
-            thanh_tien = None if ln.thanh_tien is None else sign * ln.thanh_tien
-            tien_thue = None if ln.tien_thue is None else sign * ln.tien_thue
-            line_note = note
-            if ln.tchat == "2":
-                line_note = "; ".join(p for p in (note, "Hàng khuyến mại") if p)
-            elif ln.tchat == "3":
-                line_note = "; ".join(p for p in (note, "Chiết khấu thương mại (ghi âm)") if p)
-            vouchers.append({
-                **header, "ma_hang": ma, "ten_hang": ln.ten_hang, "dvt": ln.dvt,
-                "so_luong": ln.so_luong, "don_gia": ln.don_gia, "thanh_tien": thanh_tien,
-                "tl_ck": ln.tl_ck, "tien_ck": ln.st_ck, "thue_suat": ln.thue_suat, "tien_thue": tien_thue,
-                "ghi_chu": line_note,
-            })
+            tt = None if ln.thanh_tien is None else sign * ln.thanh_tien
+            thue = None if ln.tien_thue is None else sign * ln.tien_thue
+            if ln.tchat == "3":
+                notes.append(f"Dòng {ln.stt} là chiết khấu thương mại, ghi âm")
+            add_line(ma, ln.ten_hang, ln.dvt, ln.so_luong, ln.don_gia, tt, ln.tl_ck, ln.st_ck, ln.thue_suat, thue)
+            sum_tt += tt or 0
+            sum_thue += thue or 0
             res.lines += 1
+
+        diff_tt = None if inv.tong_tien_chua_thue is None else round((inv.tong_tien_chua_thue or 0) - sum_tt, 2)
+        diff_thue = None if inv.tong_tien_thue is None else round((inv.tong_tien_thue or 0) - sum_thue, 2)
+        if (diff_tt and abs(diff_tt) >= 1) or (diff_thue and abs(diff_thue) >= 1):
+            notes.append("Tổng dòng hàng lệch tổng hóa đơn, kiểm tra trước khi nhập")
+        checks.append({
+            "so_ct": so_ct, "hd": label, "ngay": inv.ngay_lap, "mst": inv.nb_mst,
+            "tt_dong": _vnd(sum_tt, 2), "tt_hd": inv.tong_tien_chua_thue, "lech_tt": diff_tt,
+            "thue_dong": _vnd(sum_thue, 2), "thue_hd": inv.tong_tien_thue, "lech_thue": diff_thue,
+            "tong_tt": inv.tong_tien_tt, "co_xml": "Có" if has_xml else "Không",
+            "ghi_chu": "; ".join(n for n in notes if n),
+        })
 
         if has_xml:
             # Tên file: <MST người bán>_<ký hiệu>_<số>, lấy từ tên file gốc (purchase_<nguồn>_<MST>_<mẫu>_<ký hiệu>_<số>).
             parts = stem.split("_")
             nice = "_".join([parts[2], parts[4], "_".join(parts[5:])]) if len(parts) >= 6 else stem
-            dest = xml_out / f"{nice}.xml"
-            shutil.copyfile(path, dest)
+            shutil.copyfile(path, xml_out / f"{nice}.xml")
             res.xml_files += 1
         res.vouchers += 1
 
+    res.excel_path = str(misa_dir / TEMPLATE_OUT_NAME)
+    _fill_template(Path(res.excel_path), rows)
+
     wb = Workbook()
     ws = wb.active
-    ws.title = "ChungTuMuaHang"
-    _write(ws, VOUCHER_COLUMNS, vouchers)
+    ws.title = "KiemTra"
+    _write(ws, CHECK_COLUMNS, checks)
     _write(wb.create_sheet("DanhMuc_NhaCungCap"), SUPPLIER_COLUMNS, list(suppliers.values()))
-    _write(wb.create_sheet("DanhMuc_VatTuHangHoa"), ITEM_COLUMNS, [v for v in catalog.by_key.values()])
-    skip_ws = wb.create_sheet("BoQua")
-    _write(skip_ws, [("Hóa đơn", "hd", False), ("MST người bán", "mst", False), ("Lý do không đưa vào", "ly_do", False), ("File", "file", False)], skipped)
+    _write(wb.create_sheet("DanhMuc_VatTuHangHoa"), ITEM_COLUMNS, list(catalog.by_key.values()))
+    _write(wb.create_sheet("BoQua"), [("Hóa đơn", "hd", False), ("MST người bán", "mst", False), ("Lý do không đưa vào", "ly_do", False), ("File", "file", False)], skipped)
     guide = wb.create_sheet("HuongDan")
     for line in HUONG_DAN.strip().splitlines():
         guide.append([line])
     guide.column_dimensions["A"].width = 120
+    res.catalog_path = str(misa_dir / "MISA_DanhMuc_va_KiemTra.xlsx")
+    wb.save(res.catalog_path)
+    old = misa_dir / "MISA_NhapKhau_MuaHang.xlsx"  # tên file của bản trước
+    if old.exists():
+        old.unlink()
 
-    res.excel_path = str(misa_dir / "MISA_NhapKhau_MuaHang.xlsx")
-    wb.save(res.excel_path)
     res.skipped = len(skipped)
     res.suppliers = len(suppliers)
     res.items = len(catalog.by_key)
+    res.warnings = [c["hd"] + ": " + c["ghi_chu"] for c in checks if "lệch" in c["ghi_chu"]]
     (misa_dir / "HUONG_DAN_NHAP_MISA.txt").write_text(HUONG_DAN.strip() + "\n", encoding="utf-8")
     log.info(
-        "[MISA] %d chứng từ (%d dòng), %d XML gom cho MISA, %d hóa đơn không có XML, %d bỏ qua; %d NCC, %d mã hàng -> %s",
+        "[MISA] %d chứng từ (%d dòng), %d XML, %d hóa đơn không có XML, %d bỏ qua; %d NCC, %d mã hàng -> %s",
         res.vouchers, res.lines, res.xml_files, res.no_xml, res.skipped, res.suppliers, res.items, res.excel_path,
     )
     return res
 
 
-HUONG_DAN = """
-HƯỚNG DẪN ĐƯA HÓA ĐƠN MUA VÀO VÀO MISA SME
-==========================================
+CHECK_COLUMNS: list[tuple[str, str, bool]] = [
+    ("Số chứng từ", "so_ct", False), ("Hóa đơn", "hd", False), ("Ngày", "ngay", False), ("MST người bán", "mst", False),
+    ("Tổng thành tiền các dòng", "tt_dong", False), ("Tiền hàng trên HĐ", "tt_hd", False), ("Lệch tiền hàng", "lech_tt", False),
+    ("Tổng thuế các dòng", "thue_dong", False), ("Tiền thuế trên HĐ", "thue_hd", False), ("Lệch tiền thuế", "lech_thue", False),
+    ("Tổng thanh toán HĐ", "tong_tt", False), ("Có XML gốc", "co_xml", False), ("Ghi chú", "ghi_chu", False),
+]
+
+
+HUONG_DAN = r"""
+HƯỚNG DẪN NHẬP HÓA ĐƠN MUA VÀO VÀO MISA SME
+===========================================
 
 Thư mục misa gồm:
-- xml_mua_vao\\              : file XML gốc của các hóa đơn mua vào (đã bỏ hóa đơn bị hủy / bị thay thế).
-- MISA_NhapKhau_MuaHang.xlsx : sheet ChungTuMuaHang (mỗi dòng hàng một dòng, các dòng cùng "Số chứng từ" là một chứng từ),
-                               DanhMuc_NhaCungCap, DanhMuc_VatTuHangHoa, BoQua (hóa đơn không đưa vào và lý do).
+- Mua_hang_khong_qua_kho_VND.xlsx : ĐÚNG MẪU nhập khẩu "Chứng từ mua hàng không qua kho" (VND) của MISA.
+                                    Mỗi dòng hàng một dòng; các dòng cùng "Số chứng từ" là một chứng từ.
+- MISA_DanhMuc_va_KiemTra.xlsx    : KiemTra (đối chiếu tổng dòng hàng với tổng hóa đơn, ghi chú cần xem lại),
+                                    DanhMuc_NhaCungCap, DanhMuc_VatTuHangHoa, BoQua (hóa đơn bị hủy/bị thay thế).
+- xml_mua_vao\                    : XML gốc, dùng nếu muốn MISA tự đọc hóa đơn điện tử (không bắt buộc).
 
-CÁCH 1 - MISA ĐỌC TRỰC TIẾP FILE XML (khuyên dùng cho hóa đơn có XML)
-1. Mở MISA SME > phân hệ Mua hàng > chức năng lập chứng từ từ hóa đơn điện tử (nhập khẩu hóa đơn điện tử).
-2. Chọn nhập từ tệp hóa đơn điện tử, trỏ tới thư mục misa\\xml_mua_vao, chọn tất cả file .xml.
-3. MISA tự đọc thông tin người bán, dòng hàng, thuế; chị chọn loại chứng từ (mua hàng hóa / mua dịch vụ),
-   tài khoản hạch toán rồi lưu. Nhà cung cấp, mã hàng chưa có MISA sẽ gợi ý thêm mới.
+TRƯỚC KHI NHẬP
+1. Mở MISA_DanhMuc_va_KiemTra.xlsx, sheet KiemTra: xem các dòng có ghi chú "lệch", "kiểm tra lại".
+2. Mở Mua_hang_khong_qua_kho_VND.xlsx, kiểm tra các cột tài khoản:
+   - "TK chi phí (*)"         mặc định 642 (TT133). Dùng TT200 thì thường là 6422; hàng mua về bán thì dùng mẫu qua kho.
+   - "TK công nợ/TK tiền (*)" mặc định 331 (Phương thức thanh toán = 0: chưa thanh toán).
+   - "TK thuế GTGT"           mặc định 1331; "Nhóm HHDV mua vào" mặc định 1.
+   Đơn vị kinh doanh ngành không chịu thuế GTGT (vd giáo dục) cần xem lại thuế đầu vào có được khấu trừ không.
+   Có thể đổi mặc định trong file .env (MISA_TK_CHI_PHI, MISA_TK_CONG_NO, MISA_TK_THUE, MISA_NHOM_HHDV,
+   MISA_PHUONG_THUC_TT) rồi bấm lại "Xuất sang MISA".
 
-CÁCH 2 - NHẬP TỪ EXCEL (dùng cho mọi hóa đơn, kể cả hóa đơn không có XML như Viettel, VNPT, ngân hàng)
-1. Mở file MISA_NhapKhau_MuaHang.xlsx, kiểm tra cột "TK kho/TK chi phí" (mặc định 642), "TK công nợ" (331),
-   "TK thuế GTGT" (1331). Sửa theo chế độ kế toán của đơn vị (vd 6422 với TT200, 156 với hàng hóa nhập kho).
-   Cột tiêu đề màu đỏ là cột MISA bắt buộc.
-2. Nhập danh mục trước: trong MISA vào Tệp > Nhập khẩu từ Excel, chọn Danh mục Nhà cung cấp, chọn file này,
-   sheet DanhMuc_NhaCungCap. Làm tương tự với Vật tư hàng hóa / Dịch vụ, sheet DanhMuc_VatTuHangHoa.
-3. Nhập chứng từ: phân hệ Mua hàng > tab Mua hàng hóa, dịch vụ > bấm mũi tên cạnh "Thêm chứng từ mua hàng"
-   > Nhập từ excel. Chọn file này, sheet ChungTuMuaHang.
-4. Ở bước "Ghép dữ liệu", kiểm tra mỗi thông tin của MISA đã ghép đúng cột trong file (tên cột trong file đặt
-   giống tên trên màn hình chứng từ MISA nên phần lớn tự ghép). Cột nào chưa ghép thì chọn tay.
-5. Bấm Thực hiện, xem kết quả kiểm tra, sửa các dòng MISA báo lỗi rồi nhập lại.
+BƯỚC 1 - NHẬP DANH MỤC (chỉ cần với nhà cung cấp / mặt hàng chưa có trong MISA)
+   MISA: Tệp > Nhập khẩu từ Excel > Danh mục Nhà cung cấp, chọn MISA_DanhMuc_va_KiemTra.xlsx, sheet DanhMuc_NhaCungCap.
+   Làm tương tự với Danh mục Vật tư hàng hóa, sheet DanhMuc_VatTuHangHoa. Ở bước "Ghép dữ liệu" kiểm tra cột ghép đúng.
+   Mã nhà cung cấp = MST người bán. Nếu MISA đã có NCC với mã khác, sửa cột "Mã nhà cung cấp" trong file chứng từ.
+
+BƯỚC 2 - NHẬP CHỨNG TỪ
+   MISA: Mua hàng > tab Mua hàng hóa, dịch vụ > mũi tên cạnh "Thêm chứng từ mua hàng" > Nhập từ excel
+   (hoặc Tệp > Nhập khẩu từ Excel > Chứng từ mua hàng không qua kho).
+   Chọn file Mua_hang_khong_qua_kho_VND.xlsx. Vì file đúng mẫu MISA nên các cột tự ghép.
+   Bấm Thực hiện, xem kết quả kiểm tra, sửa dòng MISA báo lỗi rồi nhập lại.
+   Nếu MISA chỉ nhận .xls: mở file bằng Excel > Save As > Excel 97-2003 Workbook (.xls).
 
 LƯU Ý
-- Không dùng cả hai cách cho cùng một hóa đơn (sẽ bị nhập trùng). Gợi ý: Cách 1 cho hóa đơn có XML,
-  Cách 2 lọc cột "Ghi chú (tool)" chứa "Không có XML gốc" cho phần còn lại.
-- Số chứng từ được tạo dạng MH + ký hiệu + số hóa đơn để không trùng; có thể sửa theo quy tắc của đơn vị.
-- Hóa đơn thay thế / điều chỉnh / đã bị điều chỉnh có ghi chú "kiểm tra lại trước khi hạch toán".
-- Chiết khấu thương mại ghi âm; hàng khuyến mại giữ nguyên số liệu trên hóa đơn.
+- Số chứng từ tạo dạng MH + ký hiệu + số hóa đơn (tối đa 20 ký tự) để không trùng.
+- Cột ĐVT phải có trong danh mục Đơn vị tính của MISA; ĐVT lạ cần thêm vào MISA trước.
+- Chiết khấu thương mại ghi âm; hàng khuyến mại giữ số liệu trên hóa đơn.
+- Không vừa nhập Excel vừa cho MISA đọc XML cho cùng một hóa đơn (sẽ trùng).
 """

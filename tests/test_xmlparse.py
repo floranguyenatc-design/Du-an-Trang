@@ -67,7 +67,7 @@ def test_parsed_from_detail_json():
     assert inv.shdon == "6928336" and inv.nb_ten == "Viettel" and inv.tong_tien_tt == 479302
     l1, l2 = inv.lines
     assert l1.ten_hang == "Cước di động" and l1.dvt == "Tháng" and l1.so_luong == 1 and l1.don_gia == 435729
-    assert l1.thue_suat == "10%" and l1.tien_thue == 43572.9
+    assert l1.thue_suat == "10%" and l1.tien_thue == 43573  # làm tròn đồng
     assert l2.ten_hang == "Khuyến mại" and l2.thue_suat == "KCT" and l2.tien_thue == 0
 
 

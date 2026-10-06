@@ -173,18 +173,18 @@ def cmd_pull(args: argparse.Namespace, settings: Settings) -> int:
 
 
 def cmd_misa(args: argparse.Namespace, settings: Settings) -> int:
-    from .misa import MisaSettings, export_misa
+    from .misa import export_misa
 
-    res = export_misa(
-        args.thu_muc or settings.output_dir,
-        MisaSettings(tk_chi_phi=settings.misa_tk_chi_phi, tk_cong_no=settings.misa_tk_cong_no, tk_thue=settings.misa_tk_thue),
-    )
+    res = export_misa(args.thu_muc or settings.output_dir, settings.misa_settings())
     print(f"Đã chuẩn bị {res.vouchers} chứng từ ({res.lines} dòng hàng) cho MISA SME.")
-    print(f"  File Excel nhập khẩu : {res.excel_path}")
-    print(f"  XML cho MISA đọc     : {res.xml_dir} ({res.xml_files} file)")
-    print(f"  Không có XML gốc     : {res.no_xml} hóa đơn (dùng file Excel)")
-    print(f"  Bỏ qua (hủy/thay thế): {res.skipped}")
-    print(f"  Hướng dẫn            : {Path(res.folder) / 'HUONG_DAN_NHAP_MISA.txt'}")
+    print(f"  File nhập khẩu (mẫu MISA) : {res.excel_path}")
+    print(f"  Danh mục + kiểm tra       : {res.catalog_path}")
+    print(f"  XML gốc                   : {res.xml_dir} ({res.xml_files} file)")
+    print(f"  Không có XML gốc          : {res.no_xml} hóa đơn")
+    print(f"  Bỏ qua (hủy/thay thế)     : {res.skipped}")
+    for w in res.warnings:
+        print(f"  ! {w}")
+    print(f"  Hướng dẫn                 : {Path(res.folder) / 'HUONG_DAN_NHAP_MISA.txt'}")
     return 0
 
 

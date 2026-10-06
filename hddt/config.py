@@ -61,6 +61,8 @@ class Settings:
     misa_tk_chi_phi: str = "642"
     misa_tk_cong_no: str = "331"
     misa_tk_thue: str = "1331"
+    misa_nhom_hhdv: str = "1"
+    misa_phuong_thuc_tt: str = "0"
 
     @classmethod
     def from_env(cls, env_file: str = ".env") -> "Settings":
@@ -81,6 +83,16 @@ class Settings:
             misa_tk_chi_phi=g("MISA_TK_CHI_PHI", "642") or "642",
             misa_tk_cong_no=g("MISA_TK_CONG_NO", "331") or "331",
             misa_tk_thue=g("MISA_TK_THUE", "1331") or "1331",
+            misa_nhom_hhdv=g("MISA_NHOM_HHDV", "1") or "1",
+            misa_phuong_thuc_tt=g("MISA_PHUONG_THUC_TT", "0") or "0",
+        )
+
+    def misa_settings(self):
+        from .misa import MisaSettings
+
+        return MisaSettings(
+            tk_chi_phi=self.misa_tk_chi_phi, tk_cong_no=self.misa_tk_cong_no, tk_thue=self.misa_tk_thue,
+            nhom_hhdv=self.misa_nhom_hhdv, phuong_thuc_tt=self.misa_phuong_thuc_tt,
         )
 
     def proxies(self) -> dict[str, str] | None:

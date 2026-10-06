@@ -15,7 +15,7 @@ Thuế dùng, tự đọc CAPTCHA SVG, phân trang theo `state`, tải XML qua `
 4. Xong thì bấm **Mở file Excel**. Sheet `HoaDon` là bảng kê (có cột đường dẫn file PDF), sheet `ChiTiet` là từng dòng hàng hóa (tên hàng, ĐVT, số lượng, đơn giá, thành tiền, thuế), sheet `Loi` là hóa đơn không tải được.
 5. Thư mục `pdf` chứa **mỗi hóa đơn một file PDF** (bản thể hiện dựng từ XML gốc, hoặc từ dữ liệu chi tiết trên cổng thuế với hóa đơn không có XML). Bỏ tick **Tạo file PDF** nếu không cần.
 
-6. Muốn đưa vào **MISA SME**: bấm **Xuất sang MISA**. Tool tạo thư mục `misa` gồm `xml_mua_vao` (XML để MISA đọc trực tiếp), `MISA_NhapKhau_MuaHang.xlsx` (chứng từ mua hàng + danh mục nhà cung cấp, vật tư hàng hóa) và `HUONG_DAN_NHAP_MISA.txt` hướng dẫn từng bước.
+6. Muốn đưa vào **MISA SME**: bấm **Xuất sang MISA**. Tool tạo thư mục `misa` trong thư mục kết quả, gồm `Mua_hang_khong_qua_kho_VND.xlsx` (điền đúng mẫu nhập khẩu "Chứng từ mua hàng không qua kho" của MISA, 39 cột), `MISA_DanhMuc_va_KiemTra.xlsx` (danh mục nhà cung cấp, vật tư hàng hóa, bảng đối chiếu), `xml_mua_vao` và `HUONG_DAN_NHAP_MISA.txt`. Tài khoản mặc định 642/331/1331, đổi trong `.env` (`MISA_TK_CHI_PHI`, `MISA_TK_CONG_NO`, `MISA_TK_THUE`, `MISA_NHOM_HHDV`, `MISA_PHUONG_THUC_TT`).
 
 Muốn chạy bằng dòng lệnh thì dùng `cai_dat.bat`, `dang_nhap.bat`, `keo_hoa_don.bat` hoặc các lệnh bên dưới.
 

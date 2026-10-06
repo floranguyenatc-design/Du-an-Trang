@@ -15,5 +15,8 @@ hddt = "hddt.cli:main"
 [tool.setuptools]
 packages = ["hddt"]
 
+[tool.setuptools.package-data]
+hddt = ["templates/*.xlsx"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

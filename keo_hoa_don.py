@@ -425,7 +425,8 @@ def run_gui() -> None:
         state["thread"].start()
 
     def do_misa() -> None:
-        from hddt.misa import MisaSettings, export_misa
+        from hddt.config import Settings
+        from hddt.misa import export_misa
 
         out_dir = v_out.get().strip() or "output"
         set_busy(True, stoppable=False)
@@ -434,18 +435,15 @@ def run_gui() -> None:
 
         def worker() -> None:
             try:
-                res = export_misa(out_dir, MisaSettings(
-                    tk_chi_phi=env.get("MISA_TK_CHI_PHI", "642") or "642",
-                    tk_cong_no=env.get("MISA_TK_CONG_NO", "331") or "331",
-                    tk_thue=env.get("MISA_TK_THUE", "1331") or "1331",
-                ))
+                res = export_misa(out_dir, Settings.from_env(str(ENV_FILE)).misa_settings())
                 msg = (
                     f"Đã chuẩn bị {res.vouchers} hóa đơn mua vào ({res.lines} dòng hàng) cho MISA SME.\n\n"
-                    f"• Thư mục xml_mua_vao: {res.xml_files} file XML để MISA đọc trực tiếp.\n"
-                    f"• File MISA_NhapKhau_MuaHang.xlsx: chứng từ + danh mục {res.suppliers} nhà cung cấp, {res.items} mã hàng.\n"
-                    f"• {res.no_xml} hóa đơn không có XML: nhập bằng file Excel.\n"
-                    f"• {res.skipped} hóa đơn bị hủy/bị thay thế: không đưa vào (sheet BoQua).\n\n"
-                    "Cách nhập vào MISA xem file HUONG_DAN_NHAP_MISA.txt trong thư mục misa (sẽ mở ngay)."
+                    "• Mua_hang_khong_qua_kho_VND.xlsx: đúng mẫu MISA, dùng để nhập chứng từ.\n"
+                    f"• MISA_DanhMuc_va_KiemTra.xlsx: {res.suppliers} nhà cung cấp, {res.items} mã hàng, bảng kiểm tra.\n"
+                    f"• {res.no_xml} hóa đơn không có XML gốc (số liệu lấy từ cổng thuế).\n"
+                    f"• {res.skipped} hóa đơn bị hủy/bị thay thế: không đưa vào (sheet BoQua).\n"
+                    + (f"• {len(res.warnings)} hóa đơn có tổng dòng hàng lệch tổng hóa đơn: xem sheet KiemTra.\n" if res.warnings else "")
+                    + "\nCác bước nhập vào MISA: xem file HUONG_DAN_NHAP_MISA.txt trong thư mục misa (sẽ mở ngay)."
                 )
 
                 def finish() -> None:

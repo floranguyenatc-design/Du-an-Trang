@@ -123,7 +123,7 @@ def parsed_from_detail(detail: dict[str, Any]) -> ParsedInvoice:
         if tien_thue is None and thanh_tien is not None:
             rate = _tax_rate_value(rate_text)
             if rate is not None:
-                tien_thue = round(thanh_tien * rate / 100.0, 2)
+                tien_thue = round(thanh_tien * rate / 100.0)
         co_thue = None
         for k in ("THTienCoVAT", "ThanhTienCoVAT", "TongTienCoThue"):
             if k in extra:

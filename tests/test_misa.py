@@ -42,43 +42,97 @@ def _setup(tmp_path: Path) -> Path:
 
 
 def test_export_misa(tmp_path):
+    from datetime import datetime
+
+    from hddt.misa import MISA_COLUMNS
+
     out = _setup(tmp_path)
     res = export_misa(out, MisaSettings(tk_chi_phi="6422"))
     assert res.vouchers == 3 and res.skipped == 1 and res.no_xml == 1 and res.xml_files == 2
+    assert Path(res.excel_path).name == "Mua_hang_khong_qua_kho_VND.xlsx"
 
     xmls = sorted(p.name for p in Path(res.xml_dir).glob("*.xml"))
     assert xmls == ["0312345678_C25TAA_125.xml", "0312345678_C25TAA_140.xml"]
 
+    # File chứng từ: đúng mẫu MISA (1 sheet, tiêu đề 39 cột, ghi chú gợi ý của MISA vẫn còn).
     wb = load_workbook(res.excel_path)
-    assert wb.sheetnames == ["ChungTuMuaHang", "DanhMuc_NhaCungCap", "DanhMuc_VatTuHangHoa", "BoQua", "HuongDan"]
-    ws = wb["ChungTuMuaHang"]
-    header = [c.value for c in ws[1]]
-    rows = [dict(zip(header, r)) for r in ws.iter_rows(min_row=2, values_only=True)]
+    assert wb.sheetnames == ["Chứng từ mua hàng không qua kho"]
+    ws = wb.active
+    assert [ws[f"{c}1"].value for c, _ in MISA_COLUMNS] == [h for _, h in MISA_COLUMNS]
+    prompts = {str(dv.sqref).split(":")[0]: dv.prompt for dv in ws.data_validations.dataValidation}
+    assert "Nhập 10: 10%" in prompts["AA1"]
+
+    header = [ws[f"{c}1"].value for c, _ in MISA_COLUMNS]
+    rows = [dict(zip(header, r[: len(header)])) for r in ws.iter_rows(min_row=2, values_only=True) if any(r)]
     # 125: 2 dòng hàng (bỏ dòng ghi chú TChat=4); 140: 2 dòng; Viettel: 1 dòng
     assert len(rows) == 5
-    so_ct = {r["Số hóa đơn"]: r["Số chứng từ"] for r in rows}
-    assert len(set(so_ct.values())) == 3
-    assert all(r["TK kho/TK chi phí"] == "6422" and r["TK công nợ"] == "331" and r["TK thuế GTGT"] == "1331" for r in rows)
+    so_ct = {r["Số hóa đơn"]: r["Số chứng từ (*)"] for r in rows}
+    assert len(set(so_ct.values())) == 3 and all(len(v) <= 20 for v in so_ct.values())
+    for r in rows:
+        assert r["Hình thức mua hàng"] == "0" and r["Phương thức thanh toán"] == "0" and r["Nhận kèm hóa đơn"] == "1"
+        assert r["TK chi phí (*)"] == "6422" and r["TK công nợ/TK tiền (*)"] == "331"
+        assert isinstance(r["Ngày hạch toán (*)"], datetime) and r["Ngày hạch toán (*)"] == r["Ngày hóa đơn"]
+        assert r["Mã hàng (*)"] and r["Mã nhà cung cấp"]
 
     viettel = [r for r in rows if r["Mã nhà cung cấp"] == "0100109106"][0]
-    assert viettel["Tên hàng"] == "Cước dịch vụ viễn thông" and viettel["Đơn giá"] == 435729 and viettel["% thuế GTGT"] == "10%"
-    assert "Không có XML gốc" in viettel["Ghi chú (tool)"]
+    assert viettel["Tên hàng"] == "Cước dịch vụ viễn thông" and viettel["Đơn giá"] == 435729 and viettel["Số lượng"] == 1
+    assert viettel["% thuế GTGT"] == "10" and viettel["Tiền thuế GTGT"] == 43573
+    assert viettel["TK thuế GTGT"] == "1331" and viettel["Nhóm HHDV mua vào"] == "1"
+
+    hd125 = [r for r in rows if r["Số hóa đơn"] == "125"]
+    assert [(r["Tên hàng"], r["ĐVT"], r["Số lượng"], r["Đơn giá"], r["Thành tiền"], r["% thuế GTGT"], r["Tiền thuế GTGT"]) for r in hd125] == [
+        ("Dịch vụ tư vấn", "Gói", 2, 1000000, 2000000, "10", 200000),
+        ("Văn phòng phẩm", "Hộp", 10, 50000, 500000, "8", 40000),
+    ]
 
     ck = [r for r in rows if r["Số hóa đơn"] == "140" and r["Tên hàng"] == "Văn phòng phẩm"][0]
-    assert ck["Thành tiền"] == -500000 and ck["Tiền thuế GTGT"] == -40000 and "Chiết khấu" in ck["Ghi chú (tool)"]
-    assert "kiểm tra lại" in ck["Ghi chú (tool)"]  # hóa đơn điều chỉnh
+    assert ck["Thành tiền"] == -500000 and ck["Tiền thuế GTGT"] == -40000
 
-    ncc = list(wb["DanhMuc_NhaCungCap"].iter_rows(min_row=2, values_only=True))
+    # File danh mục + kiểm tra
+    wb2 = load_workbook(res.catalog_path)
+    assert wb2.sheetnames == ["KiemTra", "DanhMuc_NhaCungCap", "DanhMuc_VatTuHangHoa", "BoQua", "HuongDan"]
+    checks = {r[0]: r for r in wb2["KiemTra"].iter_rows(min_row=2, values_only=True)}
+    chk140 = [r for r in checks.values() if "số 140" in r[1]][0]
+    assert "chiết khấu" in chk140[12] and "kiểm tra lại" in chk140[12] and "lệch" in chk140[12]
+    chk125 = [r for r in checks.values() if "số 125" in r[1]][0]
+    assert chk125[6] == 0 and chk125[9] == 0 and chk125[11] == "Có"
+    assert res.warnings and "140" in res.warnings[0]
+
+    ncc = list(wb2["DanhMuc_NhaCungCap"].iter_rows(min_row=2, values_only=True))
     assert sorted(r[0] for r in ncc) == ["0100109106", "0312345678"]
-    items = {r[1]: r for r in wb["DanhMuc_VatTuHangHoa"].iter_rows(min_row=2, values_only=True)}
+    items = {r[1]: r for r in wb2["DanhMuc_VatTuHangHoa"].iter_rows(min_row=2, values_only=True)}
     assert items["Cước dịch vụ viễn thông"][2] == "Dịch vụ" and items["Cước dịch vụ viễn thông"][0] == "SP_0000"
     assert items["Văn phòng phẩm"][2] == "Vật tư hàng hóa"
     codes = [r[0] for r in items.values()]
     assert len(codes) == len(set(codes))
+    # mã hàng trên chứng từ đều có trong danh mục
+    assert {r["Mã hàng (*)"] for r in rows} <= set(codes)
 
-    skipped = list(wb["BoQua"].iter_rows(min_row=2, values_only=True))
+    skipped = list(wb2["BoQua"].iter_rows(min_row=2, values_only=True))
     assert len(skipped) == 1 and "hủy" in skipped[0][2]
     assert (Path(res.folder) / "HUONG_DAN_NHAP_MISA.txt").is_file()
+
+
+def test_payment_method_changes_counter_account(tmp_path):
+    out = _setup(tmp_path)
+    res = export_misa(out, MisaSettings(phuong_thuc_tt="1"))
+    ws = load_workbook(res.excel_path).active
+    assert ws["C2"].value == "1" and ws["S2"].value == "1111"
+
+
+def test_misa_vat_rate():
+    from hddt.misa import misa_vat_rate
+
+    assert misa_vat_rate("10%") == ("10", None)
+    assert misa_vat_rate("8%") == ("8", None)
+    assert misa_vat_rate("0%") == ("0", None)
+    assert misa_vat_rate("5") == ("5", None)
+    assert misa_vat_rate("0.1") == ("10", None)
+    assert misa_vat_rate("KCT") == ("KCT", None)
+    assert misa_vat_rate("kkknt") == ("KKKNT", None)
+    assert misa_vat_rate("KHAC:3.5%") == ("KHAC", 3.5)
+    assert misa_vat_rate("3,5%") == ("KHAC", 3.5)
+    assert misa_vat_rate("") == ("", None)
 
 
 def test_same_seller_code_for_different_items_gets_unique_codes():

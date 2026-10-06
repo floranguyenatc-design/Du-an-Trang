@@ -111,7 +111,18 @@ class FakeGdt:
                 zf.writestr("invoice.html", "<html></html>")
             return FakeResponse(200, buf.getvalue())
         if endpoint == "detail":
-            return FakeResponse(200, {"shdon": q["shdon"][0], "hdhhdvu": []})
+            if q["shdon"] == ["999"]:
+                return FakeResponse(500, {"message": "no detail"})
+            return FakeResponse(200, {
+                "nbmst": q["nbmst"][0], "khmshdon": q["khmshdon"][0], "khhdon": q["khhdon"][0], "shdon": q["shdon"][0],
+                "nbten": "Tập đoàn Công nghiệp - Viễn thông Quân đội", "nmmst": "0109876543", "nmten": "CÔNG TY CP XYZ",
+                "tdlap": "2025-12-16T00:00:00", "tgtcthue": 350000, "tgtthue": 35000, "tgtttbso": 385000,
+                "hdhhdvu": [
+                    {"stt": 1, "tchat": 1, "ten": "Cước dịch vụ viễn thông", "dvtinh": "Tháng", "sluong": 1,
+                     "dgia": 350000, "thtien": 350000, "tsuat": 0.1, "ltsuat": "10%"},
+                    {"stt": 2, "tchat": 1, "ten": "Phí SIM", "dvtinh": "Cái", "sluong": 2, "dgia": 0, "thtien": 0, "ltsuat": "KCT"},
+                ],
+            })
         return FakeResponse(404, {"message": "not found"})
 
 

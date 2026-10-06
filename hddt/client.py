@@ -492,7 +492,7 @@ class GdtClient:
 
     def get_detail(self, ref: InvoiceRef) -> dict[str, Any]:
         url = f"{API_URL}/{ref.family}/invoices/detail?{ref.query_string()}"
-        return self._request("GET", url, action=f"Xem hóa đơn {self._direction_text(ref)}").json()
+        return self._request("GET", url, action=f"Xem hóa đơn {self._direction_text(ref)}", max_retries=1).json()
 
     def get_related(self, ref: InvoiceRef) -> Any:
         """Thông tin liên quan (thông báo sai sót, ...)."""

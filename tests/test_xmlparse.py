@@ -50,3 +50,33 @@ def test_parse_date_formats():
     assert parse_date("2025-12-31T00:00:00") == datetime(2025, 12, 31)
     assert parse_date("31/12/2025") == datetime(2025, 12, 31)
     assert parse_date("") is None
+
+
+def test_parsed_from_detail_json():
+    from hddt.detail import parsed_from_detail
+
+    inv = parsed_from_detail({
+        "nbmst": "0100109106", "nbten": "Viettel", "khmshdon": 1, "khhdon": "K24DAA", "shdon": 6928336,
+        "tdlap": "2024-04-02T00:00:00", "tgtcthue": 435729, "tgtthue": 43573, "tgtttbso": 479302,
+        "hdhhdvu": [
+            {"stt": 1, "ten": "Cước di động", "dvtinh": "Tháng", "sluong": 1, "dgia": 435729, "thtien": 435729, "tsuat": 0.1},
+            {"stt": 2, "thhdvu": "Khuyến mại", "tchat": 2, "thtien": 0, "ltsuat": "KCT",
+             "ttkhac": [{"ttruong": "TThue", "dlieu": "0"}]},
+        ],
+    })
+    assert inv.shdon == "6928336" and inv.nb_ten == "Viettel" and inv.tong_tien_tt == 479302
+    l1, l2 = inv.lines
+    assert l1.ten_hang == "Cước di động" and l1.dvt == "Tháng" and l1.so_luong == 1 and l1.don_gia == 435729
+    assert l1.thue_suat == "10%" and l1.tien_thue == 43572.9
+    assert l2.ten_hang == "Khuyến mại" and l2.thue_suat == "KCT" and l2.tien_thue == 0
+
+
+def test_detail_tax_rate_formats():
+    from hddt.detail import _tax_rate_text
+
+    assert _tax_rate_text({"tsuat": 0.08}) == "8%"
+    assert _tax_rate_text({"tsuat": 0.1}) == "10%"
+    assert _tax_rate_text({"tsuat": 5}) == "5%"
+    assert _tax_rate_text({"tsuat": 0.035}) == "3.5%"
+    assert _tax_rate_text({"ltsuat": "KCT", "tsuat": 0}) == "KCT"
+    assert _tax_rate_text({}) == ""

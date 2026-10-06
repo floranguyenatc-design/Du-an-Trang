@@ -12,7 +12,8 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Callable
 
-from .client import FAMILIES, GdtClient, HddtError, InvoiceRef, StopRequested
+from .client import ApiError, FAMILIES, GdtClient, HddtError, InvoiceRef, StopRequested
+from .detail import parsed_from_detail
 from .export import invoice_row, line_rows, write_workbook
 from .xmlparse import ParsedInvoice, parse_invoice_file, parse_invoice_xml
 
@@ -30,6 +31,9 @@ class PullOptions:
     excel_path: str = ""
     download_xml: bool = True
     redownload: bool = False
+    # Khi GDT không có XML (hóa đơn không mã của viễn thông/ngân hàng...), lấy chi
+    # tiết dòng hàng từ màn hình "Xem chi tiết" (invoices/detail) thay thế.
+    detail_fallback: bool = True
     workers: int = 3
     page_size: int = 50
 
@@ -55,6 +59,9 @@ def _err(direction: str, family: str, ref: InvoiceRef | None, step: str, message
         "Bước": step,
         "Lỗi": message,
     }
+
+
+NO_XML_NOTE = "Không có XML gốc trên cổng thuế; chi tiết lấy từ màn hình xem hóa đơn của GDT"
 
 
 def run_pull(
@@ -125,10 +132,24 @@ def run_pull(
             target_dir = xml_dir / ref.direction
             target_dir.mkdir(parents=True, exist_ok=True)
             existing = target_dir / f"{ref.file_stem}.xml"
+            existing_json = target_dir / f"{ref.file_stem}.json"
             try:
                 if existing.is_file() and not opts.redownload:
                     return idx, str(existing), parse_invoice_file(str(existing)), ""
-                files = client.download_xml(ref)
+                if existing_json.is_file() and not opts.redownload and opts.detail_fallback:
+                    data = json.loads(existing_json.read_text(encoding="utf-8"))
+                    return idx, str(existing_json), parsed_from_detail(data), NO_XML_NOTE
+                try:
+                    files = client.download_xml(ref)
+                except ApiError as exc:
+                    if not opts.detail_fallback or exc.status not in (400, 404, 500):
+                        raise
+                    # Không có XML gốc: lấy chi tiết từ GDT.
+                    detail = client.get_detail(ref)
+                    if not isinstance(detail, dict) or not detail:
+                        raise ApiError("GDT không có hồ sơ XML và không trả chi tiết hóa đơn.", exc.status) from exc
+                    existing_json.write_text(json.dumps(detail, ensure_ascii=False, indent=1), encoding="utf-8")
+                    return idx, str(existing_json), parsed_from_detail(detail), NO_XML_NOTE
                 xml_path = None
                 parsed = None
                 for name, data in files:
@@ -164,7 +185,9 @@ def run_pull(
                     parsed_map[idx] = parsed
                 if err:
                     xml_errors[idx] = err
-                    if err != "Đã dừng":
+                    if err == NO_XML_NOTE:
+                        log.info("[XML] %d/%d %s: không có XML gốc, đã lấy chi tiết từ GDT.", done, len(refs), refs[idx].label)
+                    elif err != "Đã dừng":
                         errors.append(_err(refs[idx].direction, refs[idx].family, refs[idx], "Tải XML", err))
                         log.warning("[XML] %d/%d %s: %s", done, len(refs), refs[idx].label, err)
                 elif done % 10 == 0 or done == len(refs):

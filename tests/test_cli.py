@@ -69,7 +69,7 @@ def test_parse_xml_offline(tmp_path, monkeypatch):
     assert wb["HoaDon"].max_row == 2
     assert wb["ChiTiet"].max_row == 4
     detail = list(wb["ChiTiet"].iter_rows(min_row=2, values_only=True))
-    assert detail[0][10] == "Dịch vụ tư vấn" and detail[0][18] == 200000
+    assert detail[0][12] == "Dịch vụ tư vấn" and detail[0][20] == 200000
 
 
 def test_global_options_accepted_after_subcommand(tmp_path, monkeypatch):
@@ -80,3 +80,24 @@ def test_global_options_accepted_after_subcommand(tmp_path, monkeypatch):
     assert code == 0
     assert (out / "HoaDon_20251201_20251231.xlsx").is_file()
     assert log.is_file()
+
+
+def test_gui_helpers_without_tk(tmp_path):
+    import keo_hoa_don as gui
+
+    env = tmp_path / ".env"
+    (tmp_path / ".env.example").write_text("# mau\nGDT_USERNAME=\nGDT_PASSWORD=\nOUTPUT_DIR=output\n", encoding="utf-8")
+    gui.save_env({"GDT_USERNAME": "0109876543", "GDT_PASSWORD": "a=b", "XML_WORKERS": "2"}, env)
+    vals = gui.read_env(env)
+    assert vals["GDT_USERNAME"] == "0109876543" and vals["GDT_PASSWORD"] == "a=b" and vals["XML_WORKERS"] == "2"
+    assert env.read_text(encoding="utf-8").startswith("# mau\n")
+
+    opts = gui.build_options({"username": "0109876543", "password": "x", "start": "01/01/2024", "end": "31/12/2024", "direction": "purchase", "include_sco": False})
+    assert opts.families == ["query"] and opts.directions == ["purchase"]
+    assert str(opts.start) == "2024-01-01" and str(opts.end) == "2024-12-31"
+    import pytest
+
+    with pytest.raises(ValueError):
+        gui.build_options({"username": "", "password": "x", "start": "01/01/2024", "end": "31/12/2024"})
+    with pytest.raises(ValueError):
+        gui.build_options({"username": "a", "password": "x", "start": "31/12/2024", "end": "01/01/2024"})

@@ -84,7 +84,7 @@ class FakeGdt:
         parts = path.split("/")  # ['', 'api', family, 'invoices', endpoint]
         family, endpoint = parts[2], parts[4]
         if endpoint in ("purchase", "sold"):
-            assert q["size"] == ["2"]
+            size = int(q["size"][0])
             search = q["search"][0]
             assert search.startswith("tdlap=ge=01/12/2025T00:00:00;tdlap=le=31/12/2025T23:59:59"), search
             items = self.invoices[(family, endpoint)]
@@ -92,8 +92,8 @@ class FakeGdt:
                 want = int(search.split("ttxly==")[1].split(";")[0])
                 items = [i for i in items if i["ttxly"] == want]
             start = int(q.get("state", ["0"])[0])
-            page = items[start : start + 2]
-            nxt = start + 2
+            page = items[start : start + size]
+            nxt = start + size
             state = str(nxt) if nxt < len(items) else ""
             return FakeResponse(200, {"datas": page, "state": state, "total": len(items)})
         if endpoint == "export-xml":

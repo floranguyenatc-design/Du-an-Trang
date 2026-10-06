@@ -56,6 +56,8 @@ LINE_COLUMNS: list[tuple[str, str]] = [
     ("Ngày lập", "ngay_lap"),
     ("MST người bán", "nbmst"),
     ("Tên người bán", "nbten"),
+    ("MST người mua", "nmmst"),
+    ("Tên người mua", "nmten"),
     ("STT", "stt"),
     ("Tính chất", "tchat"),
     ("Mã hàng", "ma_hang"),
@@ -163,6 +165,8 @@ def line_rows(ref: InvoiceRef, parsed: ParsedInvoice) -> list[dict[str, Any]]:
         "ngay_lap": parsed.ngay_lap or _date(ref.raw.get("tdlap")),
         "nbmst": ref.nbmst or parsed.nb_mst,
         "nbten": parsed.nb_ten or ref.raw.get("nbten", ""),
+        "nmmst": parsed.nm_mst or ref.raw.get("nmmst", ""),
+        "nmten": parsed.nm_ten or ref.raw.get("nmten", ""),
     }
     rows = []
     for ln in parsed.lines:

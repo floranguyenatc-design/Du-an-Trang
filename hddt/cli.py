@@ -11,11 +11,9 @@ Lệnh chính:
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import os
 import sys
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -24,7 +22,8 @@ from . import __version__
 from .client import DEFAULT_USER_AGENT, FAMILIES, GdtClient, HddtError, InvoiceRef, LoginError
 from .config import Settings, parse_vn_date
 from .export import invoice_row, line_rows, write_workbook
-from .xmlparse import ParsedInvoice, parse_invoice_file, parse_invoice_xml
+from .pull import PullOptions, run_pull
+from .xmlparse import parse_invoice_file
 
 log = logging.getLogger("hddt")
 
@@ -149,105 +148,25 @@ def cmd_excel_gdt(args: argparse.Namespace, settings: Settings) -> int:
 def cmd_pull(args: argparse.Namespace, settings: Settings) -> int:
     client = _client(settings, args)
     start, end = _default_dates(args)
-    out_dir = Path(args.thu_muc or settings.output_dir)
-    xml_dir = out_dir / "xml"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    directions = DIRECTION_CHOICES[args.chieu]
-    families = _families(args)
-
-    client.login()
-    log.info("Kéo hóa đơn %s từ %s đến %s (nguồn: %s)", "/".join(directions), f"{start:%d/%m/%Y}", f"{end:%d/%m/%Y}", ", ".join(families))
-
-    refs: list[InvoiceRef] = []
-    errors: list[dict[str, Any]] = []
-    seen: set[tuple[str, ...]] = set()
-    for direction in directions:
-        try:
-            for ref in client.iter_invoices(
-                direction, start, end, families=families, ttxly=args.ttxly, page_size=settings.page_size,
-                on_page=lambda d, f, s, e, p, n: log.info("[DANH SÁCH] %s/%s %s-%s trang %d: +%d", d, f, f"{s:%d/%m}", f"{e:%d/%m/%Y}", p, n),
-            ):
-                key = (ref.direction, ref.family, ref.nbmst, ref.khmshdon, ref.khhdon, ref.shdon)
-                if key in seen:
-                    continue
-                seen.add(key)
-                refs.append(ref)
-        except HddtError as exc:
-            log.error("Lỗi lấy danh sách %s: %s", direction, exc)
-            errors.append(_err(direction, "", None, "Danh sách", str(exc)))
-    log.info("Tổng cộng %d hóa đơn.", len(refs))
-
-    # Lưu danh sách thô (JSON) để đối chiếu / dùng lại.
-    raw_path = out_dir / f"danh_sach_{start:%Y%m%d}_{end:%Y%m%d}.json"
-    raw_path.write_text(json.dumps([r.raw for r in refs], ensure_ascii=False, indent=1), encoding="utf-8")
-
-    parsed_map: dict[int, ParsedInvoice] = {}
-    xml_files: dict[int, str] = {}
-    xml_errors: dict[int, str] = {}
-
-    if not args.khong_xml and refs:
-        xml_dir.mkdir(parents=True, exist_ok=True)
-
-        def work(idx: int, ref: InvoiceRef) -> tuple[int, str | None, ParsedInvoice | None, str]:
-            target_dir = xml_dir / ref.direction
-            target_dir.mkdir(parents=True, exist_ok=True)
-            existing = target_dir / f"{ref.file_stem}.xml"
-            try:
-                if existing.is_file() and not args.tai_lai:
-                    return idx, str(existing), parse_invoice_file(str(existing)), ""
-                files = client.download_xml(ref)
-                xml_path = None
-                parsed = None
-                for name, data in files:
-                    p = target_dir / name
-                    p.write_bytes(data)
-                    if name.endswith(".xml") and xml_path is None:
-                        xml_path = str(p)
-                        try:
-                            parsed = parse_invoice_xml(data)
-                        except Exception as exc:  # noqa: BLE001
-                            return idx, xml_path, None, f"Đọc XML lỗi: {exc}"
-                return idx, xml_path, parsed, ""
-            except HddtError as exc:
-                msg = str(exc)
-                if getattr(exc, "status", None) == 500:
-                    msg = "GDT không có hồ sơ XML cho hóa đơn này (HTTP 500)"
-                return idx, None, None, msg
-            except Exception as exc:  # noqa: BLE001
-                return idx, None, None, f"Lỗi không xác định: {exc}"
-
-        workers = max(1, min(args.luong or settings.xml_workers, 10))
-        done = 0
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = [pool.submit(work, i, r) for i, r in enumerate(refs)]
-            for fut in as_completed(futures):
-                idx, path, parsed, err = fut.result()
-                done += 1
-                if path:
-                    xml_files[idx] = path
-                if parsed:
-                    parsed_map[idx] = parsed
-                if err:
-                    xml_errors[idx] = err
-                    errors.append(_err(refs[idx].direction, refs[idx].family, refs[idx], "Tải XML", err))
-                    log.warning("[XML] %d/%d %s: %s", done, len(refs), refs[idx].label, err)
-                elif done % 10 == 0 or done == len(refs):
-                    log.info("[XML] %d/%d đã tải.", done, len(refs))
-
-    rows = [invoice_row(r, parsed_map.get(i), os.path.relpath(xml_files[i], out_dir) if i in xml_files else "", xml_errors.get(i, "")) for i, r in enumerate(refs)]
-    lines: list[dict[str, Any]] = []
-    for i, r in enumerate(refs):
-        if i in parsed_map:
-            lines.extend(line_rows(r, parsed_map[i]))
-
-    excel_path = Path(args.excel) if args.excel else out_dir / f"HoaDon_{start:%Y%m%d}_{end:%Y%m%d}.xlsx"
-    write_workbook(str(excel_path), rows, lines, errors)
-    log.info("Đã ghi Excel: %s (%d hóa đơn, %d dòng hàng, %d lỗi)", excel_path, len(rows), len(lines), len(errors))
-    print(f"\nXong. Hóa đơn: {len(rows)} | Dòng hàng: {len(lines)} | Lỗi: {len(errors)}")
-    print(f"Excel : {excel_path}")
-    if not args.khong_xml:
-        print(f"XML   : {xml_dir}")
-    return 0 if not errors else 2
+    opts = PullOptions(
+        start=start,
+        end=end,
+        directions=DIRECTION_CHOICES[args.chieu],
+        families=_families(args),
+        ttxly=args.ttxly,
+        output_dir=args.thu_muc or settings.output_dir,
+        excel_path=args.excel or "",
+        download_xml=not args.khong_xml,
+        redownload=args.tai_lai,
+        workers=args.luong or settings.xml_workers,
+        page_size=settings.page_size,
+    )
+    res = run_pull(client, opts)
+    print(f"\nXong. Hóa đơn: {res.invoices} | Dòng hàng: {res.lines} | Lỗi: {res.errors}")
+    print(f"Excel : {res.excel_path}")
+    if opts.download_xml:
+        print(f"XML   : {res.xml_dir}")
+    return 0 if not res.errors else 2
 
 
 def cmd_parse_xml(args: argparse.Namespace, settings: Settings) -> int:
@@ -282,19 +201,6 @@ def cmd_parse_xml(args: argparse.Namespace, settings: Settings) -> int:
     write_workbook(str(out), rows, lines, errors)
     print(f"Đã đọc {len(files)} file XML -> {out} ({len(rows)} hóa đơn, {len(lines)} dòng hàng, {len(errors)} lỗi)")
     return 0
-
-
-def _err(direction: str, family: str, ref: InvoiceRef | None, step: str, message: str) -> dict[str, Any]:
-    return {
-        "Chiều": "Mua vào" if direction == "purchase" else ("Bán ra" if direction == "sold" else direction),
-        "Nguồn": family,
-        "MST người bán": ref.nbmst if ref else "",
-        "Mẫu số": ref.khmshdon if ref else "",
-        "Ký hiệu": ref.khhdon if ref else "",
-        "Số HĐ": ref.shdon if ref else "",
-        "Bước": step,
-        "Lỗi": message,
-    }
 
 
 # ------------------------------------------------------------------- parser

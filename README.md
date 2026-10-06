@@ -7,13 +7,14 @@ hóa đơn **mua vào / bán ra** (cả hóa đơn thường và hóa đơn **m�
 Cách làm giống các tool tải hóa đơn đang lưu hành (gọi thẳng API mà web của Tổng cục
 Thuế dùng, tự đọc CAPTCHA SVG, phân trang theo `state`, tải XML qua `export-xml`).
 
-## 0. Cách nhanh nhất trên Windows
+## 0. Cách nhanh nhất trên Windows: giao diện cửa sổ
 
 1. Cài Python từ python.org (tick *Add Python to PATH*).
-2. Bấm đúp `cai_dat.bat` (cài thư viện, tạo sẵn file `.env`).
-3. Mở `.env` bằng Notepad, điền `GDT_USERNAME`, `GDT_PASSWORD`.
-4. Bấm đúp `dang_nhap.bat` để kiểm tra đăng nhập.
-5. Bấm đúp `keo_hoa_don.bat`, nhập tháng (vd `09/2026`). Kết quả trong thư mục `output`.
+2. Bấm đúp **`Tai-hoa-don.bat`**. Lần đầu chương trình tự cài thư viện còn thiếu.
+3. Trong cửa sổ hiện ra: điền MST, mật khẩu, chọn khoảng ngày (có nút Tháng này / Tháng trước / Quý trước / Năm nay), chọn Mua vào / Bán ra / Cả hai rồi bấm **Bắt đầu tải hóa đơn**.
+4. Xong thì bấm **Mở file Excel**. Sheet `HoaDon` là bảng kê, sheet `ChiTiet` là từng dòng hàng hóa (tên hàng, ĐVT, số lượng, đơn giá, thành tiền, thuế), sheet `Loi` là hóa đơn không tải được.
+
+Muốn chạy bằng dòng lệnh thì dùng `cai_dat.bat`, `dang_nhap.bat`, `keo_hoa_don.bat` hoặc các lệnh bên dưới.
 
 ## 1. Cài đặt
 

@@ -75,6 +75,10 @@ class LoginError(HddtError):
     """Đăng nhập thất bại (sai tài khoản/mật khẩu, CAPTCHA, ...)."""
 
 
+class StopRequested(HddtError):
+    """Người dùng yêu cầu dừng."""
+
+
 class ApiError(HddtError):
     def __init__(self, message: str, status: int | None = None, body: str = ""):
         super().__init__(message)
@@ -164,7 +168,7 @@ class RateLimiter:
                     self._next = now + self.interval
                     return
                 sleep_for = target - now
-            time.sleep(min(sleep_for, 1.0))
+            time.sleep(min(sleep_for, 0.25))
 
     def pause(self, seconds: float) -> None:
         with self._lock:
@@ -203,6 +207,11 @@ class GdtClient:
             self.session.proxies.update(proxies)
         self.session.verify = verify_ssl
         self.profile: dict[str, Any] | None = None
+        self.stop_event = threading.Event()
+
+    def _check_stop(self) -> None:
+        if self.stop_event.is_set():
+            raise StopRequested("Đã dừng theo yêu cầu.")
 
     # ------------------------------------------------------------------ HTTP
     def _headers(self, *, auth: bool, referer: str, accept: str, action: str = "", origin: bool = False) -> dict[str, str]:
@@ -245,8 +254,10 @@ class GdtClient:
         rate_limit_hits = 0
         relogged = False
         while True:
+            self._check_stop()
             attempt += 1
             self.limiter.wait()
+            self._check_stop()
             headers = self._headers(auth=auth, referer=referer, accept=accept, action=action, origin=origin)
             try:
                 resp = self.session.request(method, url, headers=headers, json=json_body, timeout=self.timeout)

@@ -121,7 +121,7 @@ def invoice_row(ref: InvoiceRef, parsed: ParsedInvoice | None = None, xml_file: 
         "nbten": r.get("nbten", ""),
         "nbdchi": r.get("nbdchi", ""),
         "nmmst": r.get("nmmst", ""),
-        "nmten": r.get("nmten", ""),
+        "nmten": r.get("nmten") or r.get("nmtnmua") or "",
         "nmdchi": r.get("nmdchi", ""),
         "tgtcthue": _num(r.get("tgtcthue")),
         "tgtthue": _num(r.get("tgtthue")),
@@ -145,7 +145,7 @@ def invoice_row(ref: InvoiceRef, parsed: ParsedInvoice | None = None, xml_file: 
     if parsed is not None:
         # Ưu tiên số liệu trong XML gốc nếu danh sách thiếu.
         fill = {
-            "nbten": parsed.nb_ten, "nbdchi": parsed.nb_dchi, "nmmst": parsed.nm_mst, "nmten": parsed.nm_ten,
+            "nbten": parsed.nb_ten, "nbdchi": parsed.nb_dchi, "nmmst": parsed.nm_mst, "nmten": parsed.nm_ten or parsed.nm_hvtn,
             "nmdchi": parsed.nm_dchi, "tgtcthue": parsed.tong_tien_chua_thue, "tgtthue": parsed.tong_tien_thue,
             "ttcktmai": parsed.tong_ck, "tgtttbso": parsed.tong_tien_tt, "dvtte": parsed.dvtte, "tgia": parsed.ty_gia,
             "mhdon": parsed.mccqt, "nky": parsed.ngay_ky_nb, "ncma": parsed.ngay_ky_cqt, "htttoan": parsed.httt,
@@ -167,7 +167,7 @@ def line_rows(ref: InvoiceRef, parsed: ParsedInvoice) -> list[dict[str, Any]]:
         "nbmst": ref.nbmst or parsed.nb_mst,
         "nbten": parsed.nb_ten or ref.raw.get("nbten", ""),
         "nmmst": parsed.nm_mst or ref.raw.get("nmmst", ""),
-        "nmten": parsed.nm_ten or ref.raw.get("nmten", ""),
+        "nmten": parsed.nm_ten or parsed.nm_hvtn or ref.raw.get("nmten") or ref.raw.get("nmtnmua") or "",
     }
     rows = []
     for ln in parsed.lines:

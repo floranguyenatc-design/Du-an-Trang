@@ -171,7 +171,10 @@ def render_invoice_pdf(
 
     story.append(party("Đơn vị bán:", inv.nb_ten, inv.nb_mst, inv.nb_dchi, [("Điện thoại:", inv.nb_sdt), ("Số tài khoản:", inv.nb_stk)]))
     story.append(Spacer(1, 4))
-    story.append(party("Đơn vị mua:", inv.nm_ten, inv.nm_mst, inv.nm_dchi, [("Email:", inv.nm_email), ("Hình thức TT:", inv.httt)]))
+    buyer_extra = [("Email:", inv.nm_email), ("Hình thức TT:", inv.httt)]
+    if inv.nm_ten and inv.nm_hvtn:
+        buyer_extra.insert(0, ("Người mua hàng:", inv.nm_hvtn))
+    story.append(party("Đơn vị mua:", inv.nm_ten or inv.nm_hvtn, inv.nm_mst, inv.nm_dchi, buyer_extra))
     story.append(Spacer(1, 6))
 
     # --- bảng hàng hóa

@@ -151,6 +151,7 @@ class ParsedInvoice:
     nb_sdt: str = ""
     nb_stk: str = ""
     nm_ten: str = ""
+    nm_hvtn: str = ""  # Họ và tên người mua hàng (hóa đơn cho cá nhân thường chỉ có trường này)
     nm_mst: str = ""
     nm_dchi: str = ""
     nm_email: str = ""
@@ -200,6 +201,7 @@ def parse_invoice_xml(data: bytes | str) -> ParsedInvoice:
         nb_sdt=_text(nban, "SDThoai"),
         nb_stk=_text(nban, "STKNHang"),
         nm_ten=_text(nmua, "Ten"),
+        nm_hvtn=_text(nmua, "HVTNMHang"),
         nm_mst=_text(nmua, "MST"),
         nm_dchi=_text(nmua, "DChi"),
         nm_email=_text(nmua, "DCTDTu"),

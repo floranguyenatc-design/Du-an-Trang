@@ -89,6 +89,7 @@ def parsed_from_detail(detail: dict[str, Any]) -> ParsedInvoice:
         nb_sdt=_s(detail, "nbsdthoai"),
         nb_stk=_s(detail, "nbstkhoan"),
         nm_ten=_s(detail, "nmten"),
+        nm_hvtn=_s(detail, "nmtnmua", "nmhvtnmhang"),
         nm_mst=_s(detail, "nmmst"),
         nm_dchi=_s(detail, "nmdchi"),
         nm_email=_s(detail, "nmdctdtu"),

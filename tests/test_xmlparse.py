@@ -109,3 +109,28 @@ def test_render_pdf_many_lines_spans_pages(tmp_path):
     reader = PdfReader(out)
     assert len(reader.pages) >= 3
     assert "Mặt hàng số 120" in reader.pages[-1].extract_text() or "Mặt hàng số 120" in "".join(p.extract_text() for p in reader.pages)
+
+
+def test_individual_buyer_name_from_hvtnmhang(tmp_path):
+    from pypdf import PdfReader
+
+    from hddt.client import InvoiceRef
+    from hddt.export import invoice_row, line_rows
+    from hddt.pdfrender import render_invoice_pdf
+    from hddt.xmlparse import parse_invoice_xml
+
+    xml = FIX.read_text(encoding="utf-8").replace(
+        "<Ten>CÔNG TY CP XYZ</Ten>\n        <MST>0109876543</MST>",
+        "<HVTNMHang>Nguyễn Ngọc Bảo Hân</HVTNMHang>",
+    )
+    inv = parse_invoice_xml(xml)
+    assert inv.nm_ten == "" and inv.nm_hvtn == "Nguyễn Ngọc Bảo Hân"
+    ref = InvoiceRef("sold", "query", "0312345678", "1", "C25TAA", "125")
+    assert invoice_row(ref, inv)["nmten"] == "Nguyễn Ngọc Bảo Hân"
+    assert line_rows(ref, inv)[0]["nmten"] == "Nguyễn Ngọc Bảo Hân"
+    out = render_invoice_pdf(inv, tmp_path / "x.pdf")
+    assert "Nguyễn Ngọc Bảo Hân" in PdfReader(out).pages[0].extract_text()
+
+    from hddt.detail import parsed_from_detail
+
+    assert parsed_from_detail({"nmtnmua": "Lê Duy Bảo Huy"}).nm_hvtn == "Lê Duy Bảo Huy"

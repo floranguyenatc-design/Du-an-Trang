@@ -30,7 +30,7 @@ def test_pull_end_to_end(tmp_path, monkeypatch):
     out = tmp_path / "out"
     code = _run(["--env", str(tmp_path / "no.env"), "pull", "--thang", "12/2025", "--chieu", "mua", "--thu-muc", str(out), "--luong", "2"], fake, monkeypatch)
     assert code == 0  # hóa đơn 126 không có XML nhưng đã lấy chi tiết từ GDT -> không tính là lỗi
-    xlsx = out / "HoaDon_20251201_20251231.xlsx"
+    xlsx = out / "HoaDon_MuaVao_20251201_20251231.xlsx"
     assert xlsx.is_file()
     wb = load_workbook(xlsx)
     ws = wb["HoaDon"]
@@ -51,7 +51,7 @@ def test_pull_end_to_end(tmp_path, monkeypatch):
     err_rows = list(wb["Loi"].iter_rows(values_only=True))
     assert len(err_rows) == 1  # chỉ dòng tiêu đề
     assert (out / "xml" / "purchase" / "purchase_query_0312345678_1_C25TAA_126.json").is_file()
-    assert (out / "danh_sach_20251201_20251231.json").is_file()
+    assert (out / "danh_sach_muavao_20251201_20251231.json").is_file()
 
 
 def test_pull_reuses_existing_xml(tmp_path, monkeypatch):
@@ -84,7 +84,7 @@ def test_global_options_accepted_after_subcommand(tmp_path, monkeypatch):
     log = tmp_path / "log.txt"
     code = _run(["pull", "--env", "x", "--log-file", str(log), "--thang", "01/12/2025-31/12/2025", "--chieu", "mua", "--thu-muc", str(out), "--khong-xml"], fake, monkeypatch)
     assert code == 0
-    assert (out / "HoaDon_20251201_20251231.xlsx").is_file()
+    assert (out / "HoaDon_MuaVao_20251201_20251231.xlsx").is_file()
     assert log.is_file()
 
 
@@ -125,7 +125,7 @@ def test_no_xml_and_no_detail_goes_to_error_sheet(tmp_path, monkeypatch):
     out = tmp_path / "out"
     code = _run(["--env", "x", "pull", "--thang", "12/2025", "--chieu", "mua", "--thu-muc", str(out), "--khong-mtt"], fake, monkeypatch)
     assert code == 2
-    wb = load_workbook(out / "HoaDon_20251201_20251231.xlsx")
+    wb = load_workbook(out / "HoaDon_MuaVao_20251201_20251231.xlsx")
     err_rows = list(wb["Loi"].iter_rows(min_row=2, values_only=True))
     assert [r[5] for r in err_rows] == ["999"]
 
@@ -148,7 +148,7 @@ def test_pull_creates_pdf_per_invoice(tmp_path, monkeypatch):
     text = "".join(pg.extract_text() for pg in PdfReader(str(pdf_dir / pdfs[1])).pages)
     assert "Cước dịch vụ viễn thông" in text and "350.000" in text and "Tập đoàn Công nghiệp" in text
     assert "không có file XML gốc" in text
-    wb = load_workbook(out / "HoaDon_20251201_20251231.xlsx")
+    wb = load_workbook(out / "HoaDon_MuaVao_20251201_20251231.xlsx")
     header = [c.value for c in wb["HoaDon"][1]]
     col = header.index("File PDF")
     values = [r[col] for r in wb["HoaDon"].iter_rows(min_row=2, values_only=True)]

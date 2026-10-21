@@ -23,7 +23,7 @@ def _setup(tmp_path: Path) -> Path:
         # gói có 2 XML -> lưu _1, _2
         {"nbmst": "0312345678", "khmshdon": "1", "khhdon": "C25TAA", "shdon": "140", "tthai": 3, "ttxly": 5},
     ]
-    (out / "danh_sach_20251201_20251231.json").write_text(json.dumps(items, ensure_ascii=False), encoding="utf-8")
+    (out / "danh_sach_muavao_20251201_20251231.json").write_text(json.dumps(items, ensure_ascii=False), encoding="utf-8")
     shutil.copy(FIX, pur / "purchase_query_0312345678_1_C25TAA_125.xml")
     shutil.copy(FIX, pur / "purchase_query_0312345678_1_C25TAA_130.xml")
     xml140 = FIX.read_text(encoding="utf-8").replace("<SHDon>125</SHDon>", "<SHDon>140</SHDon>").replace(
@@ -69,8 +69,8 @@ def test_export_misa(tmp_path):
     so_ct = {r["Số hóa đơn"]: r["Số chứng từ (*)"] for r in rows}
     assert len(set(so_ct.values())) == 3 and all(len(v) <= 20 for v in so_ct.values())
     for r in rows:
-        assert r["Hình thức mua hàng"] == 0 and r["Phương thức thanh toán"] == 0 and r["Nhận kèm hóa đơn"] == 1
-        assert r["TK chi phí (*)"] == "6422" and r["TK công nợ/TK tiền (*)"] == "331"
+        assert r["Hình thức mua hàng"] == 0 and r["Phương thức thanh toán"] == 1 and r["Nhận kèm hóa đơn"] == 1
+        assert r["TK chi phí (*)"] == "6422" and r["TK công nợ/TK tiền (*)"] == "1111"
         assert isinstance(r["Ngày hạch toán (*)"], datetime) and r["Ngày hạch toán (*)"] == r["Ngày hóa đơn"]
         assert r["Mã hàng (*)"] and r["Mã nhà cung cấp"]
 
@@ -93,9 +93,9 @@ def test_export_misa(tmp_path):
     assert wb2.sheetnames == ["KiemTra", "DanhMuc_NhaCungCap", "DanhMuc_VatTuHangHoa", "BoQua", "HuongDan"]
     checks = {r[0]: r for r in wb2["KiemTra"].iter_rows(min_row=2, values_only=True)}
     chk140 = [r for r in checks.values() if "số 140" in r[1]][0]
-    assert "chiết khấu" in chk140[12] and "kiểm tra lại" in chk140[12] and "lệch" in chk140[12]
+    assert "chiết khấu" in chk140[13] and "kiểm tra lại" in chk140[13] and "lệch" in chk140[13]
     chk125 = [r for r in checks.values() if "số 125" in r[1]][0]
-    assert chk125[6] == 0 and chk125[9] == 0 and chk125[11] == "Có"
+    assert chk125[7] == 0 and chk125[10] == 0 and chk125[12] == "Có"
     assert res.warnings and "140" in res.warnings[0]
 
     ncc = list(wb2["DanhMuc_NhaCungCap"].iter_rows(min_row=2, values_only=True))
@@ -113,11 +113,54 @@ def test_export_misa(tmp_path):
     assert (Path(res.folder) / "HUONG_DAN_NHAP_MISA.txt").is_file()
 
 
-def test_payment_method_changes_counter_account(tmp_path):
+def test_payment_method_fixed_modes(tmp_path):
     out = _setup(tmp_path)
-    res = export_misa(out, MisaSettings(phuong_thuc_tt="1"))
+    ws = load_workbook(export_misa(out, MisaSettings(phuong_thuc_tt="0")).excel_path).active
+    assert ws["C2"].value == 0 and ws["S2"].value == "331"
+    ws = load_workbook(export_misa(out, MisaSettings(phuong_thuc_tt="2")).excel_path).active
+    assert ws["C2"].value == 2 and ws["S2"].value == "1121"
+    ws = load_workbook(export_misa(out, MisaSettings(phuong_thuc_tt="4")).excel_path).active
+    assert ws["C2"].value == 4 and ws["S2"].value == "1111"  # séc tiền mặt -> TK tiền mặt
+
+
+def test_bank_invoices_use_1121_and_others_1111(tmp_path):
+    from hddt.misa import is_bank_seller
+
+    out = _setup(tmp_path)
+    pur = out / "xml" / "purchase"
+    banks = [
+        ("NGAN HANG TMCP CONG THUONG VIET NAM - CN SAM SON", "0100111948-125", "K24TBB", 11474),  # không dấu
+        ("Ngân hàng TMCP Sài Gòn Thương Tín - Hội sở", "0301103908", "K24TAB", 12686),
+        ("Ngân hàng Vietinbank chi nhánh Thanh Hóa", "0100111948-130", "K24TBC", 5),
+        ("Sacombank - Chi nhánh Sầm Sơn", "0300000001", "K24TAD", 6),
+    ]
+    items = json.loads(next(out.glob("danh_sach_*.json")).read_text(encoding="utf-8"))
+    for ten, mst, kh, so in banks:
+        detail = {"nbmst": mst, "nbten": ten, "khmshdon": 1, "khhdon": kh, "shdon": so, "tdlap": "2024-05-29T00:00:00",
+                  "tgtcthue": 35000, "tgtthue": 0,
+                  "hdhhdvu": [{"stt": 1, "ten": "Phí dịch vụ ngân hàng", "thtien": 35000, "ltsuat": "KCT"}]}
+        (pur / f"purchase_query_{mst}_1_{kh}_{so}.json").write_text(json.dumps(detail, ensure_ascii=False), encoding="utf-8")
+        items.append({"nbmst": mst, "khmshdon": "1", "khhdon": kh, "shdon": str(so), "tthai": 1, "ttxly": 5})
+    next(out.glob("danh_sach_*.json")).write_text(json.dumps(items, ensure_ascii=False), encoding="utf-8")
+
+    res = export_misa(out)
     ws = load_workbook(res.excel_path).active
-    assert ws["C2"].value == 1 and ws["S2"].value == "1111"
+    header = [c.value for c in ws[1]]
+    rows = [dict(zip(header, r)) for r in ws.iter_rows(min_row=2, values_only=True) if any(r)]
+    by_seller = {r["Tên nhà cung cấp"]: r for r in rows}
+    for ten, *_ in banks:
+        r = by_seller[ten]
+        assert r["TK công nợ/TK tiền (*)"] == "1121" and r["Phương thức thanh toán"] == 2, ten
+    for r in rows:
+        if r["Tên nhà cung cấp"] not in {b[0] for b in banks}:
+            assert r["TK công nợ/TK tiền (*)"] == "1111" and r["Phương thức thanh toán"] == 1
+    # sheet KiemTra nêu rõ từng hóa đơn đã xếp vào loại nào
+    wb2 = load_workbook(res.catalog_path)
+    labels = [r[4] for r in wb2["KiemTra"].iter_rows(min_row=2, values_only=True)]
+    assert sum("TK 1121" in l for l in labels) == 4 and sum("TK 1111" in l for l in labels) == 3
+
+    assert is_bank_seller("NGÂN HÀNG TMCP ĐẦU TƯ VÀ PHÁT TRIỂN") and is_bank_seller("MB Bank") and is_bank_seller("Vietcombank")
+    assert not is_bank_seller("CÔNG TY TNHH ABC") and not is_bank_seller("Công ty Điện lực Thanh Hóa")
 
 
 def test_misa_vat_rate():

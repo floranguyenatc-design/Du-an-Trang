@@ -150,7 +150,10 @@ def run_pull(
             errors.append(_err(direction, "", None, "Danh sách", str(exc)))
     log.info("Tổng cộng %d hóa đơn.", len(refs))
 
-    raw_path = out_dir / f"danh_sach_{opts.start:%Y%m%d}_{opts.end:%Y%m%d}.json"
+    # Tên file có chiều mua/bán để lần kéo sau (chiều khác, cùng khoảng ngày) không ghi đè lần trước.
+    tag = "_".join({"purchase": "muavao", "sold": "banra"}[d] for d in opts.directions)
+    tag_title = "_".join({"purchase": "MuaVao", "sold": "BanRa"}[d] for d in opts.directions)
+    raw_path = out_dir / f"danh_sach_{tag}_{opts.start:%Y%m%d}_{opts.end:%Y%m%d}.json"
     raw_path.write_text(json.dumps([r.raw for r in refs], ensure_ascii=False, indent=1), encoding="utf-8")
 
     parsed_map: dict[int, ParsedInvoice] = {}
@@ -264,7 +267,7 @@ def run_pull(
         if i in parsed_map:
             lines.extend(line_rows(r, parsed_map[i]))
 
-    excel_path = Path(opts.excel_path) if opts.excel_path else out_dir / f"HoaDon_{opts.start:%Y%m%d}_{opts.end:%Y%m%d}.xlsx"
+    excel_path = Path(opts.excel_path) if opts.excel_path else out_dir / f"HoaDon_{tag_title}_{opts.start:%Y%m%d}_{opts.end:%Y%m%d}.xlsx"
     write_workbook(str(excel_path), rows, lines, errors)
     log.info("Đã ghi Excel: %s (%d hóa đơn, %d dòng hàng, %d lỗi)", excel_path, len(rows), len(lines), len(errors))
 

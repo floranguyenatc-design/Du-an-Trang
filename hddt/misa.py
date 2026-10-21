@@ -69,9 +69,6 @@ NUM_COLS = ("U", "V", "W", "X", "Y", "AB", "AC")
 # Giới hạn độ dài theo ghi chú của mẫu MISA.
 MAX_LEN = {"G": 20, "H": 25, "I": 20, "J": 25, "M": 128, "N": 255, "Q": 255, "R": 20, "S": 25}
 
-# Phương thức thanh toán (cột C) -> tài khoản đối ứng mặc định (cột S).
-PAYMENT_ACCOUNT = {"0": None, "1": "1111", "2": "1121", "3": "1121", "4": "1121"}
-
 SUPPLIER_COLUMNS: list[tuple[str, str, bool]] = [
     ("Mã nhà cung cấp", "ma", True),
     ("Tên nhà cung cấp", "ten", True),
@@ -100,7 +97,12 @@ class MisaSettings:
     tk_cong_no: str = "331"
     tk_thue: str = "1331"
     nhom_hhdv: str = "1"  # mã nhóm HHDV mua vào trong danh mục MISA
-    phuong_thuc_tt: str = "0"  # 0 chưa thanh toán, 1 tiền mặt, 2 ủy nhiệm chi, 3 séc CK, 4 séc TM
+    # "auto" (mặc định): hóa đơn của ngân hàng -> Ủy nhiệm chi, TK 1121; còn lại -> Tiền mặt, TK 1111.
+    # Hoặc cố định cho mọi hóa đơn: 0 chưa thanh toán (TK công nợ), 1 tiền mặt, 2 ủy nhiệm chi, 3 séc CK, 4 séc TM.
+    phuong_thuc_tt: str = "auto"
+    tk_tien_mat: str = "1111"
+    tk_ngan_hang: str = "1121"
+    tu_khoa_ngan_hang: tuple = ("ngan hang", "bank")  # nhận diện người bán là ngân hàng (không phân biệt dấu/hoa thường)
     so_ct_prefix: str = "MH"
 
 
@@ -164,6 +166,31 @@ def _ascii_slug(text: str) -> str:
     return t
 
 
+def _fold(text: str) -> str:
+    """Chữ thường, bỏ dấu tiếng Việt, gộp ký tự lạ thành một dấu cách: 'NGÂN HÀNG TMCP' -> 'ngan hang tmcp'."""
+    t = unicodedata.normalize("NFD", text or "")
+    t = "".join(c for c in t if unicodedata.category(c) != "Mn").replace("đ", "d").replace("Đ", "D")
+    return re.sub(r"[^a-z0-9]+", " ", t.lower()).strip()
+
+
+def is_bank_seller(name: str, keywords: tuple = ("ngan hang", "bank")) -> bool:
+    folded = _fold(name)
+    return any(_fold(k) in folded for k in keywords if _fold(k))
+
+
+def payment_for(settings: "MisaSettings", seller_name: str) -> tuple[str, str, bool]:
+    """Trả về (mã Phương thức thanh toán cho cột C, TK công nợ/TK tiền cho cột S, người bán là ngân hàng)."""
+    bank = is_bank_seller(seller_name, settings.tu_khoa_ngan_hang)
+    mode = str(settings.phuong_thuc_tt).strip().lower()
+    if mode not in ("0", "1", "2", "3", "4"):
+        mode = "2" if bank else "1"
+    account = {
+        "0": settings.tk_cong_no, "1": settings.tk_tien_mat, "2": settings.tk_ngan_hang,
+        "3": settings.tk_ngan_hang, "4": settings.tk_tien_mat,
+    }[mode]
+    return mode, account, bank
+
+
 def _norm_name(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "").strip()).lower()
 
@@ -208,6 +235,8 @@ def _load_raw_index(out_dir: Path) -> dict[str, dict[str, Any]]:
 
     index: dict[str, dict[str, Any]] = {}
     for f in sorted(out_dir.glob("danh_sach_*.json")):
+        if f.name.startswith("danh_sach_banra_"):  # danh sách hóa đơn bán ra, không dùng cho mua vào
+            continue
         try:
             items = json.loads(f.read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -261,7 +290,7 @@ def _write(ws, columns: list[tuple[str, str, bool]], rows: list[dict[str, Any]])
     ws.freeze_panes = "A2"
     for i, (name, key, _) in enumerate(columns, start=1):
         letter = get_column_letter(i)
-        ws.column_dimensions[letter].width = 45 if key in ("hd", "dia_chi", "ten", "ghi_chu", "ly_do") else max(11, len(name) + 3)
+        ws.column_dimensions[letter].width = 45 if key in ("hd", "dia_chi", "ten", "ghi_chu", "ly_do", "tt") else max(11, len(name) + 3)
         if key.startswith("ngay"):
             for (c,) in ws.iter_rows(min_row=2, min_col=i, max_col=i):
                 c.number_format = "dd/mm/yyyy"
@@ -329,9 +358,6 @@ def export_misa(output_dir: str | Path, settings: MisaSettings | None = None) ->
         )
     invoices.sort(key=lambda t: (t[2].ngay_lap or datetime.min, t[2].nb_mst, t[2].khhdon, t[2].shdon))
 
-    pay = s.phuong_thuc_tt if s.phuong_thuc_tt in PAYMENT_ACCOUNT else "0"
-    tk_doi_ung = PAYMENT_ACCOUNT[pay] or s.tk_cong_no
-
     catalog = ItemCatalog()
     suppliers: dict[str, dict[str, Any]] = {}
     rows: list[dict[str, Any]] = []
@@ -371,6 +397,7 @@ def export_misa(output_dir: str | Path, settings: MisaSettings | None = None) ->
         if tthai in (2, 3, 5):
             notes.append(TTHAI_LABELS.get(tthai, "") + " - kiểm tra lại trước khi hạch toán")
 
+        pay, tk_doi_ung, bank = payment_for(s, inv.nb_ten)
         header = {
             "B": 0, "C": int(pay), "D": 1,
             "E": inv.ngay_lap, "F": inv.ngay_lap, "G": so_ct,
@@ -423,6 +450,7 @@ def export_misa(output_dir: str | Path, settings: MisaSettings | None = None) ->
             notes.append("Tổng dòng hàng lệch tổng hóa đơn, kiểm tra trước khi nhập")
         checks.append({
             "so_ct": so_ct, "hd": label, "ngay": inv.ngay_lap, "mst": inv.nb_mst,
+            "tt": f"{'Ngân hàng' if bank else 'Mua hàng'}: {PAY_LABEL[pay]}, TK {tk_doi_ung}",
             "tt_dong": _vnd(sum_tt, 2), "tt_hd": inv.tong_tien_chua_thue, "lech_tt": diff_tt,
             "thue_dong": _vnd(sum_thue, 2), "thue_hd": inv.tong_tien_thue, "lech_thue": diff_thue,
             "tong_tt": inv.tong_tien_tt, "co_xml": "Có" if has_xml else "Không",
@@ -469,8 +497,11 @@ def export_misa(output_dir: str | Path, settings: MisaSettings | None = None) ->
     return res
 
 
+PAY_LABEL = {"0": "chưa thanh toán", "1": "tiền mặt", "2": "ủy nhiệm chi", "3": "séc chuyển khoản", "4": "séc tiền mặt"}
+
 CHECK_COLUMNS: list[tuple[str, str, bool]] = [
     ("Số chứng từ", "so_ct", False), ("Hóa đơn", "hd", False), ("Ngày", "ngay", False), ("MST người bán", "mst", False),
+    ("Thanh toán / TK tiền (cột C, S)", "tt", False),
     ("Tổng thành tiền các dòng", "tt_dong", False), ("Tiền hàng trên HĐ", "tt_hd", False), ("Lệch tiền hàng", "lech_tt", False),
     ("Tổng thuế các dòng", "thue_dong", False), ("Tiền thuế trên HĐ", "thue_hd", False), ("Lệch tiền thuế", "lech_thue", False),
     ("Tổng thanh toán HĐ", "tong_tt", False), ("Có XML gốc", "co_xml", False), ("Ghi chú", "ghi_chu", False),
@@ -492,11 +523,13 @@ TRƯỚC KHI NHẬP
 1. Mở MISA_DanhMuc_va_KiemTra.xlsx, sheet KiemTra: xem các dòng có ghi chú "lệch", "kiểm tra lại".
 2. Mở Mua_hang_khong_qua_kho_VND.xlsx, kiểm tra các cột tài khoản:
    - "TK chi phí (*)"         mặc định 642 (TT133). Dùng TT200 thì thường là 6422; hàng mua về bán thì dùng mẫu qua kho.
-   - "TK công nợ/TK tiền (*)" mặc định 331 (Phương thức thanh toán = 0: chưa thanh toán).
+   - "TK công nợ/TK tiền (*)" tự điền theo người bán: 1111 (Phương thức thanh toán = 1, tiền mặt) cho hóa đơn mua hàng,
+                             1121 (Phương thức thanh toán = 2, ủy nhiệm chi) cho hóa đơn của ngân hàng. Cột
+                             "Thanh toán / TK tiền" trong sheet KiemTra cho biết từng hóa đơn đã được xếp vào loại nào.
    - "TK thuế GTGT"           mặc định 1331; "Nhóm HHDV mua vào" mặc định 1.
    Đơn vị kinh doanh ngành không chịu thuế GTGT (vd giáo dục) cần xem lại thuế đầu vào có được khấu trừ không.
    Có thể đổi mặc định trong file .env (MISA_TK_CHI_PHI, MISA_TK_CONG_NO, MISA_TK_THUE, MISA_NHOM_HHDV,
-   MISA_PHUONG_THUC_TT) rồi bấm lại "Xuất sang MISA".
+   MISA_THANH_TOAN, MISA_TK_TIEN_MAT, MISA_TK_NGAN_HANG) rồi bấm lại "Xuất sang MISA".
 
 BƯỚC 1 - NHẬP DANH MỤC (chỉ cần với nhà cung cấp / mặt hàng chưa có trong MISA)
    MISA: Tệp > Nhập khẩu từ Excel > Danh mục Nhà cung cấp, chọn MISA_DanhMuc_va_KiemTra.xlsx, sheet DanhMuc_NhaCungCap.

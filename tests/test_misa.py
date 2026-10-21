@@ -2,6 +2,7 @@ import json
 import shutil
 from pathlib import Path
 
+import pytest
 from openpyxl import load_workbook
 
 from hddt.misa import MisaSettings, export_misa
@@ -41,10 +42,16 @@ def _setup(tmp_path: Path) -> Path:
     return out
 
 
+def res_template():
+    from hddt.misa import resolve_template
+
+    return resolve_template("2020")
+
+
 def test_export_misa(tmp_path):
     from datetime import datetime
 
-    from hddt.misa import MISA_COLUMNS
+    from hddt.misa import template_info
 
     out = _setup(tmp_path)
     res = export_misa(out, MisaSettings(tk_chi_phi="6422"))
@@ -58,11 +65,11 @@ def test_export_misa(tmp_path):
     wb = load_workbook(res.excel_path)
     assert wb.sheetnames == ["Chứng từ mua hàng không qua kho"]
     ws = wb.active
-    assert [ws[f"{c}1"].value for c, _ in MISA_COLUMNS] == [h for _, h in MISA_COLUMNS]
+    header = [c.value for c in ws[1] if c.value]
+    assert len(header) == 38 and "Tỷ lệ tính thuế (Thuế suất KHAC)" not in header  # mẫu MISA SME 2020 R3
+    assert header == list(template_info(res_template())[0])
     prompts = {str(dv.sqref).split(":")[0]: dv.prompt for dv in ws.data_validations.dataValidation}
     assert "Nhập 10: 10%" in prompts["AA1"]
-
-    header = [ws[f"{c}1"].value for c, _ in MISA_COLUMNS]
     rows = [dict(zip(header, r[: len(header)])) for r in ws.iter_rows(min_row=2, values_only=True) if any(r)]
     # 125: 2 dòng hàng (bỏ dòng ghi chú TChat=4); 140: 2 dòng; Viettel: 1 dòng
     assert len(rows) == 5
@@ -96,7 +103,7 @@ def test_export_misa(tmp_path):
     assert "chiết khấu" in chk140[13] and "kiểm tra lại" in chk140[13] and "lệch" in chk140[13]
     chk125 = [r for r in checks.values() if "số 125" in r[1]][0]
     assert chk125[7] == 0 and chk125[10] == 0 and chk125[12] == "Có"
-    assert res.warnings and "140" in res.warnings[0]
+    assert any("số 140" in w and "lệch" in w for w in res.warnings)
 
     ncc = list(wb2["DanhMuc_NhaCungCap"].iter_rows(min_row=2, values_only=True))
     assert sorted(r[0] for r in ncc) == ["0100109106", "0312345678"]
@@ -203,18 +210,69 @@ def test_export_misa_empty_dir(tmp_path):
     assert cli.main(["--env", "x", "misa", "--thu-muc", str(tmp_path)]) == 1
 
 
-def test_output_matches_original_template_layout(tmp_path):
-    """Tiêu đề, độ rộng cột, font của file xuất khớp mẫu MISA gốc chị gửi."""
-    from openpyxl.utils import get_column_letter
+@pytest.mark.parametrize("mau", ["2020", "moi"])
+def test_output_matches_template_layout(tmp_path, mau):
+    """Tiêu đề, độ rộng cột, font của file xuất khớp từng mẫu MISA đi kèm."""
+    from hddt.misa import resolve_template, template_info
 
-    from hddt.misa import MISA_COLUMNS
-
-    res = export_misa(_setup(tmp_path))
+    res = export_misa(_setup(tmp_path), MisaSettings(mau=mau))
     ws = load_workbook(res.excel_path).active
-    # độ rộng cột (ký tự) đọc từ mẫu .xls gốc
-    expected_width = {"A": 16.0, "D": 23.57, "G": 21.43, "P": 23.29, "AB": 35.71}
-    for col, w in expected_width.items():
-        assert abs(ws.column_dimensions[col].width - w) < 0.6, col
-    for i, (col, head) in enumerate(MISA_COLUMNS, start=1):
-        assert get_column_letter(i) == col and ws[f"{col}1"].value == head
-        assert ws[f"{col}1"].font.name == "Times New Roman" and ws[f"{col}1"].font.b
+    tpl = load_workbook(resolve_template(mau)).active
+    heads_out = [(c.column_letter, c.value) for c in ws[1] if c.value]
+    heads_tpl = [(c.column_letter, c.value) for c in tpl[1] if c.value]
+    assert heads_out == heads_tpl
+    assert len(heads_out) == (38 if mau == "2020" else 39)
+    for letter, _ in heads_out:
+        assert abs((ws.column_dimensions[letter].width or 0) - (tpl.column_dimensions[letter].width or 0)) < 0.01, letter
+        assert ws[f"{letter}1"].font.name == "Times New Roman" and ws[f"{letter}1"].font.b
+    assert len(ws.data_validations.dataValidation) == len(tpl.data_validations.dataValidation)
+    assert template_info(resolve_template(mau))[1] == ({"0", "5", "10"} if mau == "2020" else {"0", "5", "8", "10", "KCT", "KKKNT", "KHAC"})
+
+
+def test_columns_follow_header_names_in_2020_template(tmp_path):
+    """Mẫu 2020 R3 không có cột Tỷ lệ tính thuế nên Tiền thuế GTGT ở AB, TK thuế AD, Nhóm HHDV AE (mẫu 39 cột: AC, AE, AF)."""
+    out = _setup(tmp_path)
+    ws = load_workbook(export_misa(out).excel_path).active
+    assert [ws[f"{c}1"].value for c in ("AA", "AB", "AC", "AD", "AE")] == [
+        "% thuế GTGT", "Tiền thuế GTGT", "TKĐƯ thuế GTGT", "TK thuế GTGT", "Nhóm HHDV mua vào"]
+    row = {ws[f"{c}1"].value: ws[f"{c}{r}"].value for r in range(2, 7) for c in ("AA", "AB", "AC", "AD", "AE", "J") if ws[f"J{r}"].value == "6928336"}
+    assert row["% thuế GTGT"] == "10" and row["Tiền thuế GTGT"] == 43573 and row["TKĐƯ thuế GTGT"] is None
+    assert row["TK thuế GTGT"] == "1331" and row["Nhóm HHDV mua vào"] == "1"
+
+    ws39 = load_workbook(export_misa(out, MisaSettings(mau="moi")).excel_path).active
+    assert [ws39[f"{c}1"].value for c in ("AA", "AB", "AC", "AD", "AE", "AF")] == [
+        "% thuế GTGT", "Tỷ lệ tính thuế (Thuế suất KHAC)", "Tiền thuế GTGT", "TKĐƯ thuế GTGT", "TK thuế GTGT", "Nhóm HHDV mua vào"]
+    vt = [r for r in range(2, 7) if ws39[f"J{r}"].value == "6928336"][0]
+    assert ws39[f"AC{vt}"].value == 43573 and ws39[f"AE{vt}"].value == "1331" and ws39[f"AF{vt}"].value == "1"
+
+
+def test_vat_rate_not_in_template_hint_is_flagged(tmp_path):
+    """Mẫu 2020 R3 chỉ liệt kê thuế suất 0/5/10: hóa đơn có 8% vẫn ghi đúng nhưng bị đánh dấu ở KiemTra."""
+    out = _setup(tmp_path)  # hóa đơn 125 có dòng thuế suất 8%
+    res = export_misa(out)
+    wb2 = load_workbook(res.catalog_path)
+    notes = {r[1]: r[13] for r in wb2["KiemTra"].iter_rows(min_row=2, values_only=True)}
+    n125 = [v for k, v in notes.items() if "số 125" in k][0]
+    assert "Thuế suất 8 không có trong ghi chú của mẫu MISA" in n125 and "0, 5, 10" in n125
+    assert any("mẫu MISA" in w for w in res.warnings)
+    ws = load_workbook(res.excel_path).active
+    assert "8" in {ws[f"AA{r}"].value for r in range(2, 8)}
+    # mẫu 39 cột có liệt kê thuế suất 8 nên không đánh dấu
+    res39 = export_misa(out, MisaSettings(mau="moi"))
+    n125b = [r[13] for r in load_workbook(res39.catalog_path)["KiemTra"].iter_rows(min_row=2, values_only=True) if "số 125" in r[1]][0]
+    assert "mẫu MISA" not in (n125b or "")
+
+
+def test_template_choice_and_custom_path(tmp_path):
+    import pytest as _pt
+
+    from hddt.misa import BUNDLED_TEMPLATES, resolve_template
+
+    assert resolve_template("2020") == BUNDLED_TEMPLATES["2020"] and resolve_template("MOI") == BUNDLED_TEMPLATES["moi"]
+    custom = tmp_path / "mau_rieng.xlsx"
+    custom.write_bytes(BUNDLED_TEMPLATES["2020"].read_bytes())
+    assert resolve_template(str(custom)) == custom
+    with _pt.raises(ValueError):
+        resolve_template("khong-co")
+    res = export_misa(_setup(tmp_path / "x"), MisaSettings(mau=str(custom)))
+    assert Path(res.excel_path).is_file()

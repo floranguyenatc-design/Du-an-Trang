@@ -46,7 +46,12 @@ HEADER_FONT = Font(bold=True, color="FFFFFF")
 # Trạng thái không hạch toán: 4 = bị thay thế, 6 = bị hủy.
 SKIP_TTHAI = {4: "Hóa đơn đã bị thay thế (hạch toán theo hóa đơn thay thế)", 6: "Hóa đơn đã bị hủy"}
 
-TEMPLATE_PATH = Path(__file__).parent / "templates" / "misa_mua_hang_khong_qua_kho_vnd.xlsx"
+TEMPLATES_DIR = Path(__file__).parent / "templates"
+# Hai mẫu đi kèm: "2020" = mẫu MISA SME 2020 R3 (38 cột, mặc định), "moi" = mẫu có thêm cột "Tỷ lệ tính thuế (Thuế suất KHAC)" (39 cột).
+BUNDLED_TEMPLATES = {
+    "2020": TEMPLATES_DIR / "misa_mua_hang_khong_qua_kho_vnd_2020.xlsx",
+    "moi": TEMPLATES_DIR / "misa_mua_hang_khong_qua_kho_vnd.xlsx",
+}
 TEMPLATE_OUT_NAME = "Mua_hang_khong_qua_kho_VND.xlsx"
 
 # Cột của mẫu MISA "Chứng từ mua hàng không qua kho" (đúng thứ tự A..AM).
@@ -63,11 +68,15 @@ MISA_COLUMNS: list[tuple[str, str]] = [
     ("AG", "Giá tính thuế NK"), ("AH", "% thuế NK"), ("AI", "Tiền thuế NK"), ("AJ", "TK thuế NK"),
     ("AK", "% thuế TTĐB"), ("AL", "Tiền thuế TTĐB"), ("AM", "TK thuế TTĐB"),
 ]
-DATE_COLS = ("E", "F", "K")
-TEXT_COLS = ("G", "H", "I", "J", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "AA", "AD", "AE", "AF")
-NUM_COLS = ("U", "V", "W", "X", "Y", "AB", "AC")
+# Dòng dữ liệu dùng vị trí cột của mẫu 39 cột làm khóa chung; khi ghi vào mẫu thì đổi sang TÊN cột
+# rồi tìm đúng vị trí trong mẫu đang dùng, nên mẫu thiếu/thêm cột vẫn ghi đúng chỗ.
+HEADER_OF = dict(MISA_COLUMNS)
+DATE_HEADERS = {HEADER_OF[c] for c in ("E", "F", "K")}
+TEXT_HEADERS = {HEADER_OF[c] for c in ("G", "H", "I", "J", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "AA", "AD", "AE", "AF")}
+NUM_HEADERS = {HEADER_OF[c] for c in ("U", "V", "W", "X", "Y", "AB", "AC")}
 # Giới hạn độ dài theo ghi chú của mẫu MISA.
-MAX_LEN = {"G": 20, "H": 25, "I": 20, "J": 25, "M": 128, "N": 255, "Q": 255, "R": 20, "S": 25}
+MAX_LEN = {HEADER_OF[c]: n for c, n in {"G": 20, "H": 25, "I": 20, "J": 25, "M": 128, "N": 255, "Q": 255, "R": 20, "S": 25}.items()}
+VAT_HEADER = "% thuế GTGT"
 
 SUPPLIER_COLUMNS: list[tuple[str, str, bool]] = [
     ("Mã nhà cung cấp", "ma", True),
@@ -100,6 +109,7 @@ class MisaSettings:
     # "auto" (mặc định): hóa đơn của ngân hàng -> Ủy nhiệm chi, TK 1121; còn lại -> Tiền mặt, TK 1111.
     # Hoặc cố định cho mọi hóa đơn: 0 chưa thanh toán (TK công nợ), 1 tiền mặt, 2 ủy nhiệm chi, 3 séc CK, 4 séc TM.
     phuong_thuc_tt: str = "auto"
+    mau: str = "2020"  # mẫu nhập khẩu MISA: "2020" | "moi" | đường dẫn tới file mẫu .xlsx của chính đơn vị
     tk_tien_mat: str = "1111"
     tk_ngan_hang: str = "1121"
     tu_khoa_ngan_hang: tuple = ("ngan hang", "bank")  # nhận diện người bán là ngân hàng (không phân biệt dấu/hoa thường)
@@ -302,27 +312,60 @@ def _write(ws, columns: list[tuple[str, str, bool]], rows: list[dict[str, Any]])
                 c.number_format = "@"
 
 
-def _fill_template(path: Path, rows: list[dict[str, Any]]) -> None:
+def resolve_template(mau: str) -> Path:
+    key = (mau or "2020").strip()
+    if key.lower() in BUNDLED_TEMPLATES:
+        return BUNDLED_TEMPLATES[key.lower()]
+    p = Path(key)
+    if p.suffix.lower() == ".xlsx" and p.is_file():
+        return p
+    raise ValueError(f"Mẫu MISA '{mau}' không hợp lệ: dùng 2020, moi hoặc đường dẫn tới file mẫu .xlsx.")
+
+
+def template_info(path: Path) -> tuple[dict[str, str], set[str] | None]:
+    """(tên cột -> chữ cột, các mã thuế suất mà ghi chú của mẫu cho phép; None nếu mẫu không ghi rõ)."""
     from openpyxl import load_workbook
 
-    wb = load_workbook(TEMPLATE_PATH)
+    ws = load_workbook(path).active
+    headers = {str(c.value).strip(): c.column_letter for c in ws[1] if c.value}
+    allowed: set[str] | None = None
+    vat_col = headers.get(VAT_HEADER)
+    for dv in ws.data_validations.dataValidation:
+        if vat_col and str(dv.sqref).startswith(vat_col + "1") and dv.prompt:
+            found = set(re.findall(r"Nhập\s+([A-Za-z0-9]+)\s*:", dv.prompt))
+            allowed = found or None
+    return headers, allowed
+
+
+def _fill_template(path: Path, rows: list[dict[str, Any]], template_path: Path) -> list[str]:
+    """Điền dữ liệu vào bản sao của mẫu theo tên cột. Trả về cảnh báo (cột có dữ liệu nhưng mẫu không có)."""
+    from openpyxl import load_workbook
+
+    wb = load_workbook(template_path)
     ws = wb.active
+    headers = {str(c.value).strip(): c.column_letter for c in ws[1] if c.value}
+    lost: dict[str, int] = {}
     for i, row in enumerate(rows, start=2):
-        for col, _ in MISA_COLUMNS:
-            v = row.get(col)
+        for key, v in row.items():
             if v in (None, ""):
                 continue
-            if col in MAX_LEN and isinstance(v, str):
-                v = _cut(v, MAX_LEN[col])
+            head = HEADER_OF.get(key)
+            col = headers.get(head)
+            if col is None:
+                lost[head] = lost.get(head, 0) + 1
+                continue
+            if head in MAX_LEN and isinstance(v, str):
+                v = _cut(v, MAX_LEN[head])
             cell = ws[f"{col}{i}"]
             cell.value = v
-            if col in DATE_COLS:
+            if head in DATE_HEADERS:
                 cell.number_format = "dd/mm/yyyy"
-            elif col in TEXT_COLS:
+            elif head in TEXT_HEADERS:
                 cell.number_format = "@"
-            elif col in NUM_COLS:
+            elif head in NUM_HEADERS:
                 cell.number_format = "#,##0.####"
     wb.save(path)
+    return [f"Mẫu MISA đang dùng không có cột '{h}': bỏ qua {n} ô có dữ liệu" for h, n in lost.items()]
 
 
 def write_misa_error(output_dir: str | Path, exc: BaseException) -> str:
@@ -357,6 +400,9 @@ def export_misa(output_dir: str | Path, settings: MisaSettings | None = None) ->
             f"Không thấy hóa đơn mua vào trong {out_dir / 'xml' / 'purchase'}. Hãy kéo hóa đơn (có tải XML) trước."
         )
     invoices.sort(key=lambda t: (t[2].ngay_lap or datetime.min, t[2].nb_mst, t[2].khhdon, t[2].shdon))
+
+    template_path = resolve_template(s.mau)
+    _, allowed_vat = template_info(template_path)
 
     catalog = ItemCatalog()
     suppliers: dict[str, dict[str, Any]] = {}
@@ -409,6 +455,12 @@ def export_misa(output_dir: str | Path, settings: MisaSettings | None = None) ->
 
         def add_line(ma: str, ten: str, dvt: str, sl, dg, tt, tl_ck, tien_ck, ts_text: str, thue) -> None:
             code, khac = misa_vat_rate(ts_text)
+            if code and allowed_vat is not None and code not in allowed_vat:
+                shown = f"KHAC ({khac}%)" if code == "KHAC" else code
+                msg = (f"Thuế suất {shown} không có trong ghi chú của mẫu MISA đang dùng "
+                       f"(chỉ có {', '.join(sorted(allowed_vat, key=lambda x: (not x.isdigit(), int(x) if x.isdigit() else 0, x)))}); kiểm tra khi nhập")
+                if msg not in notes:
+                    notes.append(msg)
             row = {
                 **header, "P": ma, "Q": ten, "T": dvt,
                 "U": _vnd(sl, 4), "V": _vnd(dg, 4), "W": _vnd(tt, 2),
@@ -466,7 +518,7 @@ def export_misa(output_dir: str | Path, settings: MisaSettings | None = None) ->
         res.vouchers += 1
 
     res.excel_path = str(misa_dir / TEMPLATE_OUT_NAME)
-    _fill_template(Path(res.excel_path), rows)
+    res.warnings = _fill_template(Path(res.excel_path), rows, template_path)
 
     wb = Workbook()
     ws = wb.active
@@ -488,7 +540,7 @@ def export_misa(output_dir: str | Path, settings: MisaSettings | None = None) ->
     res.skipped = len(skipped)
     res.suppliers = len(suppliers)
     res.items = len(catalog.by_key)
-    res.warnings = [c["hd"] + ": " + c["ghi_chu"] for c in checks if "lệch" in c["ghi_chu"]]
+    res.warnings += [c["hd"] + ": " + c["ghi_chu"] for c in checks if "lệch" in c["ghi_chu"] or "mẫu MISA" in c["ghi_chu"]]
     (misa_dir / "HUONG_DAN_NHAP_MISA.txt").write_text(HUONG_DAN.strip() + "\n", encoding="utf-8")
     log.info(
         "[MISA] %d chứng từ (%d dòng), %d XML, %d hóa đơn không có XML, %d bỏ qua; %d NCC, %d mã hàng -> %s",
@@ -519,6 +571,10 @@ Thư mục misa gồm:
                                     DanhMuc_NhaCungCap, DanhMuc_VatTuHangHoa, BoQua (hóa đơn bị hủy/bị thay thế).
 - xml_mua_vao\                    : XML gốc, dùng nếu muốn MISA tự đọc hóa đơn điện tử (không bắt buộc).
 
+MẪU ĐANG DÙNG: mặc định là mẫu "Chứng từ mua hàng không qua kho" của MISA SME 2020 R3 (38 cột). Tool ghi theo TÊN cột nên
+mẫu khác vẫn khớp; muốn dùng mẫu 39 cột (có cột "Tỷ lệ tính thuế") đặt MISA_MAU=moi trong file .env, hoặc MISA_MAU=<đường dẫn
+file mẫu .xlsx của đơn vị>.
+
 TRƯỚC KHI NHẬP
 1. Mở MISA_DanhMuc_va_KiemTra.xlsx, sheet KiemTra: xem các dòng có ghi chú "lệch", "kiểm tra lại".
 2. Mở Mua_hang_khong_qua_kho_VND.xlsx, kiểm tra các cột tài khoản:
@@ -527,6 +583,8 @@ TRƯỚC KHI NHẬP
                              1121 (Phương thức thanh toán = 2, ủy nhiệm chi) cho hóa đơn của ngân hàng. Cột
                              "Thanh toán / TK tiền" trong sheet KiemTra cho biết từng hóa đơn đã được xếp vào loại nào.
    - "TK thuế GTGT"           mặc định 1331; "Nhóm HHDV mua vào" mặc định 1.
+   - "% thuế GTGT": ghi chú trong mẫu 2020 R3 chỉ liệt kê 0, 5, 10. Hóa đơn thuế suất 8% (giảm thuế 2024), KCT... vẫn được ghi đúng
+     như trên hóa đơn nhưng được đánh dấu ở sheet KiemTra; nếu MISA báo lỗi thuế suất, xử lý các dòng đó theo cách nhập tay.
    Đơn vị kinh doanh ngành không chịu thuế GTGT (vd giáo dục) cần xem lại thuế đầu vào có được khấu trừ không.
    Có thể đổi mặc định trong file .env (MISA_TK_CHI_PHI, MISA_TK_CONG_NO, MISA_TK_THUE, MISA_NHOM_HHDV,
    MISA_THANH_TOAN, MISA_TK_TIEN_MAT, MISA_TK_NGAN_HANG) rồi bấm lại "Xuất sang MISA".

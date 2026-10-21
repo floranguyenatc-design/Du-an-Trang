@@ -37,10 +37,15 @@ def test_pull_end_to_end(tmp_path, monkeypatch):
     rows = list(ws.iter_rows(values_only=True))
     assert rows[0][:5] == ("Chiều", "Nguồn", "Ký hiệu mẫu số", "Ký hiệu hóa đơn", "Số hóa đơn")
     assert len(rows) == 5  # 1 header + 4 hóa đơn
-    by_no = {int(r[4]): r for r in rows[1:]}
-    assert by_no[125][18] == "Hóa đơn mới" and by_no[125][19] == "Đã cấp mã hóa đơn"
-    assert by_no[9][1] == "Máy tính tiền"
-    assert "chi tiết lấy từ màn hình xem hóa đơn" in by_no[126][-1]
+    by_no = {int(r[4]): dict(zip(rows[0], r)) for r in rows[1:]}
+    assert by_no[125]["Trạng thái hóa đơn"] == "Hóa đơn mới" and by_no[125]["Kết quả kiểm tra"] == "Đã cấp mã hóa đơn"
+    assert by_no[9]["Nguồn"] == "Máy tính tiền"
+    assert "chi tiết lấy từ màn hình xem hóa đơn" in by_no[126]["Ghi chú tải XML"]
+    # tiền theo thuế suất của HĐ 126 (không có XML): cộng từ dòng hàng chi tiết
+    assert by_no[126]["Chưa thuế 10%"] == 350000 and by_no[126]["Thuế GTGT 10%"] == 35000
+    assert by_no[126]["Nguồn số liệu thuế suất"] == "Cộng từ dòng hàng"
+    assert by_no[126]["Quý"] == "Quý 4/2025" and by_no[126]["Tháng"] == "Tháng 12/2025" and by_no[126]["Tính vào tổng hợp"] == "Có"
+    assert "TongHopThueSuat" in wb.sheetnames
     detail = list(wb["ChiTiet"].iter_rows(min_row=2, values_only=True))
     hd126 = [r for r in detail if r[3] == 126]
     assert [r[12] for r in hd126] == ["Cước dịch vụ viễn thông", "Phí SIM"]

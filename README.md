@@ -74,7 +74,8 @@ Kết quả nằm trong thư mục `output/` (đổi bằng `--thu-muc` hoặc `
 
 ```
 output/
-  HoaDon_MuaVao_20251201_20251231.xlsx   # Sheet HoaDon (bảng kê), ChiTiet (dòng hàng), Loi (BanRa nếu kéo hóa đơn bán ra)
+  HoaDon_MuaVao_20251201_20251231.xlsx   # Sheet HoaDon (bảng kê, có cột tiền chưa thuế/thuế theo từng thuế suất),
+                                         # TongHopThueSuat (cộng theo quý, tháng), ChiTiet (dòng hàng), Loi
   danh_sach_muavao_20251201_20251231.json# JSON thô GDT trả về (để đối chiếu, dùng khi xuất MISA)
   pdf/purchase/<chieu>_<nguon>_<MST bán>_<mẫu số>_<ký hiệu>_<số>.pdf  # mỗi hóa đơn một PDF
   xml/purchase/<chieu>_<nguon>_<MST bán>_<mẫu số>_<ký hiệu>_<số>.xml (+ .html; hoặc .json nếu GDT không có XML)
@@ -83,6 +84,15 @@ output/
 
 Chạy lại cùng khoảng ngày sẽ **dùng lại XML đã có**, chỉ tải phần còn thiếu
 (thêm `--tai-lai` để tải lại toàn bộ). Mã thoát `2` nghĩa là có hóa đơn lỗi, xem sheet `Loi`.
+
+### Tiền chưa thuế theo từng mức thuế suất
+
+Sheet `HoaDon` có các cột **Chưa thuế 0% / 5% / 8% / 10% / KCT / KKKNT / suất khác** và **Thuế GTGT 5% / 8% / 10% / suất khác**
+cho từng hóa đơn. Số liệu lấy từ bảng tổng hợp theo thuế suất ghi trên hóa đơn; hóa đơn không có bảng này thì cộng
+từ các dòng hàng (chiết khấu ghi giảm). Cột "Lệch tiền hàng so với tổng HĐ" báo hóa đơn có tổng không khớp.
+
+Sheet `TongHopThueSuat` cộng theo **quý** và **tháng** cho mua vào, bán ra. Các con số là công thức lấy từ sheet
+`HoaDon`, không tính hóa đơn bị hủy, bị thay thế (cột "Tính vào tổng hợp" = Không).
 
 ## 3. Tham số hay dùng
 

@@ -35,6 +35,7 @@ from openpyxl.utils import get_column_letter
 
 from .client import TTHAI_LABELS
 from .detail import parsed_from_detail
+from .thuesuat import misa_vat_rate  # noqa: F401  (dùng chung, giữ tên cũ cho mã gọi từ ngoài)
 from .xmlparse import ParsedInvoice, parse_invoice_file
 
 log = logging.getLogger("hddt")
@@ -130,30 +131,6 @@ class MisaResult:
     suppliers: int = 0
     items: int = 0
     warnings: list[str] = field(default_factory=list)
-
-
-def misa_vat_rate(text: str) -> tuple[str, float | None]:
-    """Chuyển thuế suất trên hóa đơn sang mã cột "% thuế GTGT" của MISA.
-
-    Trả về (mã, tỷ lệ cho thuế suất KHAC). Mã hợp lệ: 0, 5, 8, 10, KCT, KKKNT, KHAC.
-    """
-    t = (text or "").strip().upper().replace(" ", "")
-    if not t:
-        return "", None
-    if t in ("KCT", "KKKNT"):
-        return t, None
-    if t.startswith("KHAC"):
-        m = re.search(r"(\d+(?:[.,]\d+)?)", t)
-        return "KHAC", (float(m.group(1).replace(",", ".")) if m else None)
-    m = re.fullmatch(r"(\d+(?:[.,]\d+)?)%?", t)
-    if not m:
-        return "", None
-    v = float(m.group(1).replace(",", "."))
-    if 0 < v < 1 and "%" not in t:
-        v *= 100
-    if v in (0, 5, 8, 10):
-        return str(int(v)), None
-    return "KHAC", v
 
 
 def _vnd(v: float | None, decimals: int = 0) -> float | int | None:

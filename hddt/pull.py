@@ -57,6 +57,7 @@ class PullResult:
     misa_folder: str = ""
     misa_vouchers: int = 0
     misa_error: str = ""
+    misa_summary: str = ""
 
 
 def _err(direction: str, family: str, ref: InvoiceRef | None, step: str, message: str) -> dict[str, Any]:
@@ -278,13 +279,18 @@ def run_pull(
     result.errors = len(errors)
     result.stopped = stop_event.is_set()
 
-    if opts.export_misa and "purchase" in opts.directions and not result.stopped:
-        from .misa import export_misa, write_misa_error
+    if opts.export_misa and not result.stopped:
+        from .misa import write_misa_error
+        from .misa_ban import export_misa_all
 
         try:
-            mres = export_misa(out_dir, opts.misa_settings)
+            mres = export_misa_all(out_dir, opts.misa_settings, tuple(opts.directions), only_existing=False)
             result.misa_folder = mres.folder
             result.misa_vouchers = mres.vouchers
+            result.misa_summary = mres.summary()
+            if mres.errors:
+                result.misa_error = "; ".join(("Mua vào: " if d == "purchase" else "Bán ra: ") + m for d, m in mres.errors.items())
+                write_misa_error(out_dir, RuntimeError(result.misa_error))
         except Exception as exc:  # noqa: BLE001
             result.misa_error = str(exc) or type(exc).__name__
             result.misa_folder = write_misa_error(out_dir, exc)

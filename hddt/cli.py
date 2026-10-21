@@ -172,24 +172,40 @@ def cmd_pull(args: argparse.Namespace, settings: Settings) -> int:
     if res.pdfs:
         print(f"PDF   : {res.pdf_dir} ({res.pdfs} file)")
     if res.misa_folder:
-        print(f"MISA  : {res.misa_folder}" + (f" (LỖI: {res.misa_error})" if res.misa_error else f" ({res.misa_vouchers} chứng từ)"))
+        print(f"MISA  : {res.misa_folder} ({res.misa_summary or '0 chứng từ'})" + (f" LỖI: {res.misa_error}" if res.misa_error else ""))
     return 0 if not res.errors else 2
 
 
 def cmd_misa(args: argparse.Namespace, settings: Settings) -> int:
-    from .misa import export_misa
+    from .misa_ban import export_misa_all
 
-    res = export_misa(args.thu_muc or settings.output_dir, settings.misa_settings())
-    print(f"Đã chuẩn bị {res.vouchers} chứng từ ({res.lines} dòng hàng) cho MISA SME.")
-    print(f"  File nhập khẩu (mẫu MISA) : {res.excel_path}")
-    print(f"  Danh mục + kiểm tra       : {res.catalog_path}")
-    print(f"  XML gốc                   : {res.xml_dir} ({res.xml_files} file)")
-    print(f"  Không có XML gốc          : {res.no_xml} hóa đơn")
-    print(f"  Bỏ qua (hủy/thay thế)     : {res.skipped}")
-    for w in res.warnings:
-        print(f"  ! {w}")
-    print(f"  Hướng dẫn                 : {Path(res.folder) / 'HUONG_DAN_NHAP_MISA.txt'}")
-    return 0
+    dirs = tuple(DIRECTION_CHOICES[args.chieu]) if args.chieu else ("purchase", "sold")
+    allr = export_misa_all(args.thu_muc or settings.output_dir, settings.misa_settings(), dirs, only_existing=not args.chieu)
+    res = allr.mua
+    if res:
+        print(f"MUA VÀO: {res.vouchers} chứng từ ({res.lines} dòng hàng)")
+        print(f"  File nhập khẩu (mẫu MISA) : {res.excel_path}")
+        print(f"  Danh mục + kiểm tra       : {res.catalog_path}")
+        print(f"  XML gốc                   : {res.xml_dir} ({res.xml_files} file)")
+        print(f"  Không có XML gốc          : {res.no_xml} hóa đơn")
+        print(f"  Bỏ qua (hủy/thay thế)     : {res.skipped}")
+        for w in res.warnings:
+            print(f"  ! {w}")
+    ban = allr.ban
+    if ban:
+        print(f"BÁN RA: {ban.vouchers} chứng từ ({ban.lines} dòng hàng), {ban.customers} khách hàng, {ban.items} mã hàng")
+        print(f"  File bán hàng (mẫu MISA)  : {ban.excel_path}")
+        print(f"  Danh mục khách hàng       : {ban.dm_kh_path}")
+        print(f"  Kiểm tra                  : {ban.check_path}")
+        print(f"  Không có XML gốc          : {ban.no_xml} hóa đơn")
+        print(f"  Bỏ qua (hủy/thay thế...)  : {ban.skipped}")
+        for w in ban.warnings:
+            print(f"  ! {w}")
+    for d, m in allr.errors.items():
+        print(f"LỖI {'mua vào' if d == 'purchase' else 'bán ra'}: {m}")
+    print(f"Mã hàng (sửa 1 lần, lần sau dùng lại): {Path(allr.folder) / 'MaHang_MISA.xlsx'}")
+    print(f"Hướng dẫn                 : {Path(allr.folder) / 'HUONG_DAN_NHAP_MISA.txt'}")
+    return 1 if allr.errors else 0
 
 
 def cmd_parse_xml(args: argparse.Namespace, settings: Settings) -> int:
@@ -278,8 +294,9 @@ def build_parser() -> argparse.ArgumentParser:
     add_range(s)
     s.set_defaults(func=cmd_excel_gdt)
 
-    s = sub.add_parser("misa", parents=[common], help="Chuẩn bị file nhập khẩu MISA SME từ hóa đơn mua vào đã kéo")
+    s = sub.add_parser("misa", parents=[common], help="Chuẩn bị file nhập khẩu MISA SME từ hóa đơn mua vào / bán ra đã kéo")
     s.add_argument("--thu-muc", help="Thư mục kết quả đã kéo (mặc định OUTPUT_DIR hoặc ./output)")
+    s.add_argument("--chieu", choices=list(DIRECTION_CHOICES), help="Chỉ xuất một chiều (mặc định: chiều nào đã kéo thì xuất)")
     s.set_defaults(func=cmd_misa)
 
     s = sub.add_parser("parse-xml", parents=[common], help="Đọc thư mục XML có sẵn và xuất Excel (offline)")

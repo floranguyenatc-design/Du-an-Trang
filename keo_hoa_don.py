@@ -419,7 +419,7 @@ def run_gui() -> None:
                     f"Hóa đơn: {res.invoices} | Dòng hàng hóa: {res.lines} | PDF: {res.pdfs} | Lỗi: {res.errors}\n\nExcel: {res.excel_path}"
                     + (f"\nPDF: {res.pdf_dir}" if res.pdfs else "")
                     + (
-                        f"\nMISA: {res.misa_folder} ({res.misa_vouchers} chứng từ, file Mua_hang_khong_qua_kho_VND.xlsx)"
+                        f"\nMISA: {res.misa_folder} ({res.misa_summary})"
                         if res.misa_folder and not res.misa_error else ""
                     )
                     + (f"\n\nKHÔNG tạo được file MISA: {res.misa_error}\nXem file LOI_XUAT_MISA.txt trong thư mục misa." if res.misa_error else "")
@@ -445,7 +445,7 @@ def run_gui() -> None:
 
     def do_misa() -> None:
         from hddt.config import Settings
-        from hddt.misa import export_misa
+        from hddt.misa_ban import export_misa_all
 
         out_dir = v_out.get().strip() or "output"
         set_busy(True, stoppable=False)
@@ -454,16 +454,34 @@ def run_gui() -> None:
 
         def worker() -> None:
             try:
-                res = export_misa(out_dir, Settings.from_env(str(ENV_FILE)).misa_settings())
+                allr = export_misa_all(out_dir, Settings.from_env(str(ENV_FILE)).misa_settings())
+                parts = []
+                mua, ban = allr.mua, allr.ban
+                if mua:
+                    parts.append(
+                        f"MUA VÀO: {mua.vouchers} hóa đơn ({mua.lines} dòng hàng)\n"
+                        "• Mua_hang_khong_qua_kho_VND.xlsx: đúng mẫu MISA, dùng để nhập chứng từ.\n"
+                        f"• MISA_DanhMuc_va_KiemTra.xlsx: {mua.suppliers} nhà cung cấp, {mua.items} mã hàng, bảng kiểm tra.\n"
+                        f"• {mua.skipped} hóa đơn bị hủy/bị thay thế: không đưa vào (sheet BoQua).\n"
+                        + (f"• {len(mua.warnings)} ghi chú cần xem: sheet KiemTra.\n" if mua.warnings else "")
+                    )
+                if ban:
+                    parts.append(
+                        f"BÁN RA: {ban.vouchers} hóa đơn ({ban.lines} dòng hàng)\n"
+                        "• Ban_hang_VND.xlsx: đúng mẫu MISA, dùng để nhập chứng từ bán hàng.\n"
+                        f"• Danh_muc_khach_hang.xlsx: {ban.customers} khách hàng (nhập vào MISA trước).\n"
+                        f"• MISA_BanHang_KiemTra.xlsx: bảng kiểm tra, {ban.items} mã hàng.\n"
+                        f"• {ban.skipped} hóa đơn bị hủy/bị thay thế/chưa hợp lệ: không đưa vào (sheet BoQua).\n"
+                        + (f"• {len(ban.warnings)} ghi chú cần xem: sheet KiemTra.\n" if ban.warnings else "")
+                    )
+                for d, m in allr.errors.items():
+                    parts.append(f"LỖI {'mua vào' if d == 'purchase' else 'bán ra'}: {m}\n")
                 msg = (
-                    f"Đã chuẩn bị {res.vouchers} hóa đơn mua vào ({res.lines} dòng hàng) cho MISA SME.\n\n"
-                    "• Mua_hang_khong_qua_kho_VND.xlsx: đúng mẫu MISA, dùng để nhập chứng từ.\n"
-                    f"• MISA_DanhMuc_va_KiemTra.xlsx: {res.suppliers} nhà cung cấp, {res.items} mã hàng, bảng kiểm tra.\n"
-                    f"• {res.no_xml} hóa đơn không có XML gốc (số liệu lấy từ cổng thuế).\n"
-                    f"• {res.skipped} hóa đơn bị hủy/bị thay thế: không đưa vào (sheet BoQua).\n"
-                    + (f"• {len(res.warnings)} hóa đơn có tổng dòng hàng lệch tổng hóa đơn: xem sheet KiemTra.\n" if res.warnings else "")
+                    "\n".join(parts)
+                    + "\nMã hàng: sửa cột 'Mã hàng MISA' trong MaHang_MISA.xlsx một lần, lần sau tool tự dùng lại."
                     + "\nCác bước nhập vào MISA: xem file HUONG_DAN_NHAP_MISA.txt trong thư mục misa (sẽ mở ngay)."
                 )
+                res = allr
 
                 def finish() -> None:
                     v_status.set(f"Đã chuẩn bị {res.vouchers} hóa đơn cho MISA: {res.folder}")

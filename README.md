@@ -16,6 +16,8 @@ Thuế dùng, tự đọc CAPTCHA SVG, phân trang theo `state`, tải XML qua `
 5. Thư mục `pdf` chứa **mỗi hóa đơn một file PDF** (bản thể hiện dựng từ XML gốc, hoặc từ dữ liệu chi tiết trên cổng thuế với hóa đơn không có XML). Bỏ tick **Tạo file PDF** nếu không cần.
 
 6. Muốn đưa vào **MISA SME**: bấm **Xuất sang MISA**. Tool tạo thư mục `misa` trong thư mục kết quả, gồm `Mua_hang_khong_qua_kho_VND.xlsx` (điền đúng mẫu nhập khẩu "Chứng từ mua hàng không qua kho" của MISA SME 2020 R3, 38 cột; tool ghi theo tên cột nên khớp cả mẫu 39 cột khi đặt `MISA_MAU=moi`), `MISA_DanhMuc_va_KiemTra.xlsx` (danh mục nhà cung cấp, vật tư hàng hóa, bảng đối chiếu), `xml_mua_vao` và `HUONG_DAN_NHAP_MISA.txt`. Tài khoản mặc định: TK chi phí 642, TK thuế 1331; TK công nợ/TK tiền **1111** (tiền mặt) cho hóa đơn mua hàng và **1121** (ủy nhiệm chi) cho hóa đơn của ngân hàng, tool tự nhận ra người bán là ngân hàng. Đổi trong `.env` (`MISA_TK_CHI_PHI`, `MISA_TK_THUE`, `MISA_NHOM_HHDV`, `MISA_THANH_TOAN`, `MISA_TK_TIEN_MAT`, `MISA_TK_NGAN_HANG`, `MISA_MAU`).
+   - **Bán ra**: nếu đã kéo hóa đơn bán ra, thư mục `misa` có thêm `Ban_hang_VND.xlsx` (điền đúng mẫu nhập khẩu "Chứng từ bán hàng" – Bán hàng VND của MISA), `Danh_muc_khach_hang.xlsx` (đúng mẫu "Danh mục KH"; mã khách = MST nếu có, không thì tên không dấu viết liền, vd `NGUYENVANAN`) và `MISA_BanHang_KiemTra.xlsx`. Mặc định thu tiền mặt: TK Nợ 1111, TK doanh thu 5113, TK thuế 33311; số chứng từ `BH` + số hóa đơn (vd `BH00012`); thành tiền, thuế suất, tiền thuế lấy đúng như trên hóa đơn. Hóa đơn bị hủy, bị thay thế, bị CQT từ chối hoặc chưa được cấp mã không đưa vào (sheet BoQua). Đổi trong `.env`: `MISA_BAN_THANH_TOAN` (0 chưa thu – TK 131, 1 tiền mặt, 2 chuyển khoản – TK 1121), `MISA_TK_DOANH_THU`, `MISA_TK_THUE_DAU_RA`, `MISA_TK_PHAI_THU`.
+   - **Mã hàng**: file `misa/MaHang_MISA.xlsx` liệt kê mọi mặt hàng (mua vào và bán ra) với mã tool tự đặt. Sửa cột "Mã hàng MISA" thành mã đang dùng trong MISA (vd `DV`, `DV1`) một lần; các lần xuất sau tool tự dùng lại.
 
 Muốn chạy bằng dòng lệnh thì dùng `cai_dat.bat`, `dang_nhap.bat`, `keo_hoa_don.bat` hoặc các lệnh bên dưới.
 
@@ -60,7 +62,7 @@ python -m hddt pull --thang 12/2025 --chi-mtt
 # Tải file Excel do chính GDT xuất (giống nút "Xuất Excel" trên web)
 python -m hddt excel-gdt --thang 12/2025 --chieu mua
 
-# Chuẩn bị file nhập khẩu MISA SME từ hóa đơn mua vào đã kéo
+# Chuẩn bị file nhập khẩu MISA SME từ hóa đơn mua vào / bán ra đã kéo (thêm --chieu ban để chỉ xuất bán ra)
 python -m hddt misa --thu-muc output
 
 # Đọc lại thư mục XML đã tải (offline) ra Excel

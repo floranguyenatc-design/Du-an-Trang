@@ -194,5 +194,16 @@ def test_misa_error_file_written(tmp_path, monkeypatch):
     client = GdtClient("0109876543", "secret", session=session, request_interval=0, sleep=lambda s: None)
     res = run_pull(client, PullOptions(start=date(2025, 12, 1), end=date(2025, 12, 31), directions=["purchase"],
                                        families=["query"], output_dir=str(tmp_path / "o"), export_misa=True, make_pdf=False))
-    assert res.misa_error == "thử lỗi"
+    assert res.misa_error == "Mua vào: thử lỗi"
     assert "thử lỗi" in (tmp_path / "o" / "misa" / "LOI_XUAT_MISA.txt").read_text(encoding="utf-8")
+
+
+def test_pull_sold_with_misa_creates_sales_files(tmp_path, monkeypatch):
+    fake = FakeGdt()
+    out = tmp_path / "out"
+    code = _run(["--env", "x", "pull", "--thang", "12/2025", "--chieu", "ca-hai", "--thu-muc", str(out), "--misa", "--khong-pdf"], fake, monkeypatch)
+    assert code == 0
+    m = out / "misa"
+    for f in ("Mua_hang_khong_qua_kho_VND.xlsx", "Ban_hang_VND.xlsx", "Danh_muc_khach_hang.xlsx", "MISA_BanHang_KiemTra.xlsx", "MaHang_MISA.xlsx"):
+        assert (m / f).is_file(), f
+    assert not (m / "LOI_XUAT_MISA.txt").exists()

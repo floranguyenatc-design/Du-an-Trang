@@ -24,6 +24,8 @@ RATE_COLUMNS: list[tuple[str, str]] = (
 )
 # Hóa đơn bị thay thế (4), bị hủy (6) không tính vào tổng hợp theo thuế suất.
 EXCLUDED_TTHAI = {4, 6}
+# Chưa được cấp mã / bị từ chối / không đủ điều kiện cấp mã: chưa phải hóa đơn hợp lệ.
+EXCLUDED_TTXLY = {1, 2, 3, 4}
 
 HEADER_FILL = PatternFill("solid", fgColor="1F4E78")
 HEADER_FONT = Font(bold=True, color="FFFFFF")
@@ -206,7 +208,11 @@ def _add_rate_breakdown(row: dict[str, Any], raw: dict[str, Any], parsed: Parsed
         tthai = int(raw.get("tthai")) if raw.get("tthai") not in (None, "") else 0
     except (TypeError, ValueError):
         tthai = 0
-    row["tinh_th"] = "Không" if tthai in EXCLUDED_TTHAI else "Có"
+    try:
+        ttxly = int(raw.get("ttxly")) if raw.get("ttxly") not in (None, "") else None
+    except (TypeError, ValueError):
+        ttxly = None
+    row["tinh_th"] = "Không" if tthai in EXCLUDED_TTHAI or ttxly in EXCLUDED_TTXLY else "Có"
 
 
 def line_rows(ref: InvoiceRef, parsed: ParsedInvoice) -> list[dict[str, Any]]:

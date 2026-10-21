@@ -67,6 +67,10 @@ class Settings:
     misa_tk_tien_mat: str = "1111"
     misa_tk_ngan_hang: str = "1121"
     misa_tu_khoa_ngan_hang: str = "ngan hang,bank"
+    misa_ban_thanh_toan: str = "1"
+    misa_tk_doanh_thu: str = "5113"
+    misa_tk_thue_dau_ra: str = "33311"
+    misa_tk_phai_thu: str = "131"
 
     @classmethod
     def from_env(cls, env_file: str = ".env") -> "Settings":
@@ -93,6 +97,10 @@ class Settings:
             misa_tk_tien_mat=g("MISA_TK_TIEN_MAT", "1111") or "1111",
             misa_tk_ngan_hang=g("MISA_TK_NGAN_HANG", "1121") or "1121",
             misa_tu_khoa_ngan_hang=g("MISA_TU_KHOA_NGAN_HANG", "ngan hang,bank") or "ngan hang,bank",
+            misa_ban_thanh_toan=g("MISA_BAN_THANH_TOAN", "1") or "1",
+            misa_tk_doanh_thu=g("MISA_TK_DOANH_THU", "5113") or "5113",
+            misa_tk_thue_dau_ra=g("MISA_TK_THUE_DAU_RA", "33311") or "33311",
+            misa_tk_phai_thu=g("MISA_TK_PHAI_THU", "131") or "131",
         )
 
     def misa_settings(self):
@@ -103,6 +111,8 @@ class Settings:
             nhom_hhdv=self.misa_nhom_hhdv, phuong_thuc_tt=self.misa_thanh_toan,
             mau=self.misa_mau, tk_tien_mat=self.misa_tk_tien_mat, tk_ngan_hang=self.misa_tk_ngan_hang,
             tu_khoa_ngan_hang=tuple(k.strip() for k in self.misa_tu_khoa_ngan_hang.split(",") if k.strip()),
+            ban_thanh_toan=self.misa_ban_thanh_toan, tk_doanh_thu=self.misa_tk_doanh_thu,
+            tk_thue_ra=self.misa_tk_thue_dau_ra, tk_phai_thu=self.misa_tk_phai_thu,
         )
 
     def proxies(self) -> dict[str, str] | None:

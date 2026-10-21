@@ -46,6 +46,31 @@ HEADER_FONT = Font(bold=True, color="FFFFFF")
 
 # Trạng thái không hạch toán: 4 = bị thay thế, 6 = bị hủy.
 SKIP_TTHAI = {4: "Hóa đơn đã bị thay thế (hạch toán theo hóa đơn thay thế)", 6: "Hóa đơn đã bị hủy"}
+# Kết quả kiểm tra của cơ quan thuế cho thấy hóa đơn chưa hợp lệ để hạch toán.
+SKIP_TTXLY = {
+    1: "Cơ quan thuế đang kiểm tra điều kiện cấp mã",
+    2: "Cơ quan thuế từ chối hóa đơn",
+    3: "Hóa đơn đủ điều kiện cấp mã nhưng chưa được cấp mã",
+    4: "Hóa đơn không đủ điều kiện cấp mã",
+}
+
+
+def _int(v: Any) -> int:
+    try:
+        return int(v) if v not in (None, "") else 0
+    except (TypeError, ValueError):
+        return 0
+
+
+def skip_reason(raw: dict[str, Any]) -> str:
+    """Lý do không đưa hóa đơn vào MISA (rỗng nếu đưa vào)."""
+    tthai, ttxly = _int(raw.get("tthai")), raw.get("ttxly")
+    if tthai in SKIP_TTHAI:
+        return SKIP_TTHAI[tthai]
+    if ttxly not in (None, "") and _int(ttxly) in SKIP_TTXLY:
+        return SKIP_TTXLY[_int(ttxly)]
+    return ""
+
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 # Hai mẫu đi kèm: "2020" = mẫu MISA SME 2020 R3 (38 cột, mặc định), "moi" = mẫu có thêm cột "Tỷ lệ tính thuế (Thuế suất KHAC)" (39 cột).
@@ -110,6 +135,12 @@ class MisaSettings:
     # "auto" (mặc định): hóa đơn của ngân hàng -> Ủy nhiệm chi, TK 1121; còn lại -> Tiền mặt, TK 1111.
     # Hoặc cố định cho mọi hóa đơn: 0 chưa thanh toán (TK công nợ), 1 tiền mặt, 2 ủy nhiệm chi, 3 séc CK, 4 séc TM.
     phuong_thuc_tt: str = "auto"
+    # Bán ra: 0 chưa thu tiền (TK phải thu), 1 thu tiền mặt (mặc định), 2 thu chuyển khoản.
+    ban_thanh_toan: str = "1"
+    tk_phai_thu: str = "131"
+    tk_doanh_thu: str = "5113"
+    tk_thue_ra: str = "33311"
+    ban_so_ct_prefix: str = "BH"
     mau: str = "2020"  # mẫu nhập khẩu MISA: "2020" | "moi" | đường dẫn tới file mẫu .xlsx của chính đơn vị
     tk_tien_mat: str = "1111"
     tk_ngan_hang: str = "1121"
@@ -189,15 +220,27 @@ class ItemCatalog:
         self.by_key: dict[tuple[str, str, str], dict[str, Any]] = {}
         self.used: dict[str, tuple[str, str, str]] = {}
 
-    def code_for(self, ma_goc: str, ten: str, dvt: str, thue_suat: str, s: MisaSettings) -> str:
+    def auto_code(self, ma_goc: str, ten: str, dvt: str) -> str:
+        """Mã tool tự đặt (không ghi nhận vào danh mục)."""
+        key = (_norm_name(ten), _norm_name(dvt))
+        if key in self.by_key:
+            return self.by_key[key]["ma"]
+        goc = (ma_goc or "").strip()
+        base = _ascii_slug(goc)[:20] if goc else (_ascii_slug(ten)[:18] or "HH")
+        if base in self.used and self.used[base] != key:
+            h = hashlib.md5("|".join(key).encode("utf-8")).hexdigest()[:4].upper()
+            return f"{base[:20]}_{h}"
+        return base
+
+    def code_for(self, ma_goc: str, ten: str, dvt: str, thue_suat: str, s: MisaSettings, override: str = "") -> str:
         # Khóa theo tên + ĐVT: có người bán dùng một mã (vd SP.0000) cho nhiều mặt hàng.
         key = (_norm_name(ten), _norm_name(dvt))
         if key in self.by_key:
             return self.by_key[key]["ma"]
         goc = (ma_goc or "").strip()
         base = _ascii_slug(goc)[:20] if goc else (_ascii_slug(ten)[:18] or "HH")
-        code = base
-        if code in self.used and self.used[code] != key:
+        code = override.strip() if override and override.strip() else base
+        if not override and code in self.used and self.used[code] != key:
             h = hashlib.md5("|".join(key).encode("utf-8")).hexdigest()[:4].upper()
             code = f"{base[:20]}_{h}"
         self.used[code] = key
@@ -216,13 +259,81 @@ class ItemCatalog:
         return code
 
 
-def _load_raw_index(out_dir: Path) -> dict[str, dict[str, Any]]:
+MAP_FILE = "MaHang_MISA.xlsx"
+MAP_HEADERS = ["Chiều", "Tên hàng trên hóa đơn", "ĐVT", "Mã hàng MISA", "Ghi chú"]
+
+
+class MaHangMap:
+    """Bảng mã hàng (misa/MaHang_MISA.xlsx) người dùng sửa một lần, các lần xuất sau dùng lại.
+
+    Mỗi mặt hàng (chiều, tên trên hóa đơn, ĐVT) gặp lần đầu được ghi thêm với mã tool tự đặt;
+    người dùng đổi cột "Mã hàng MISA" thành mã đang có trong MISA (vd DV, CVT, A95).
+    """
+
+    def __init__(self, path: Path):
+        self.path = path
+        self.rows: list[list[Any]] = []
+        self.index: dict[tuple[str, str, str], str] = {}
+        self.added = 0
+        if path.is_file():
+            from openpyxl import load_workbook
+
+            try:
+                ws = load_workbook(path, data_only=True).active
+                for r in ws.iter_rows(min_row=2, values_only=True):
+                    r = list(r[:5]) + [None] * (5 - len(r[:5]))
+                    if not r[1]:
+                        continue
+                    self.rows.append(r)
+                    if r[3] not in (None, ""):
+                        self.index[self._key(r[0], r[1], r[2])] = str(r[3]).strip()
+            except Exception as exc:  # noqa: BLE001
+                log.warning("[MISA] Không đọc được %s: %s (dùng mã tự đặt)", path.name, exc)
+
+    @staticmethod
+    def _key(chieu: Any, ten: Any, dvt: Any) -> tuple[str, str, str]:
+        return (_norm_name(str(chieu or "")), _norm_name(str(ten or "")), _norm_name(str(dvt or "")))
+
+    def get(self, chieu: str, ten: str, dvt: str) -> str:
+        return self.index.get(self._key(chieu, ten, dvt), "")
+
+    def note(self, chieu: str, ten: str, dvt: str, code: str) -> None:
+        k = self._key(chieu, ten, dvt)
+        if k in self.index:
+            return
+        self.index[k] = code
+        self.rows.append([chieu, ten, dvt or None, code, "Tool tự đặt, sửa thành mã đang dùng trong MISA nếu cần"])
+        self.added += 1
+
+    def save(self) -> str:
+        """Ghi file; trả về cảnh báo nếu không ghi được (vd file đang mở trong Excel)."""
+        if not self.added and self.path.is_file():
+            return ""
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "MaHang"
+        cols = [(h, str(i), h == "Mã hàng MISA") for i, h in enumerate(MAP_HEADERS)]
+        _write(ws, cols, [{str(i): v for i, v in enumerate(r)} for r in self.rows])
+        ws.column_dimensions["B"].width = 55
+        ws.column_dimensions["E"].width = 50
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            wb.save(self.path)
+        except OSError as exc:
+            return f"Không ghi được {self.path.name} (đang mở trong Excel?): {exc}"
+        return ""
+
+
+def _load_raw_index(out_dir: Path, direction: str = "purchase") -> dict[str, dict[str, Any]]:
     """Ghép các file danh_sach_*.json: khóa = file_stem của hóa đơn."""
     from .client import InvoiceRef
 
+    # danh_sach_muavao_*, danh_sach_banra_*, danh_sach_muavao_banra_* (kéo cả hai chiều)
+    want = "muavao" if direction == "purchase" else "banra"
     index: dict[str, dict[str, Any]] = {}
     for f in sorted(out_dir.glob("danh_sach_*.json")):
-        if f.name.startswith("danh_sach_banra_"):  # danh sách hóa đơn bán ra, không dùng cho mua vào
+        tags = f.name[len("danh_sach_"):].split("_")
+        if ("muavao" in tags or "banra" in tags) and want not in tags:  # danh sách của chiều kia
             continue
         try:
             items = json.loads(f.read_text(encoding="utf-8"))
@@ -232,14 +343,14 @@ def _load_raw_index(out_dir: Path) -> dict[str, dict[str, Any]]:
             if not isinstance(item, dict):
                 continue
             for fam in ("query", "sco-query"):
-                ref = InvoiceRef.from_json("purchase", fam, item)
+                ref = InvoiceRef.from_json(direction, fam, item)
                 index[ref.file_stem] = item
     return index
 
 
-def _collect(out_dir: Path, raw_index: dict[str, dict[str, Any]]) -> list[tuple[str, Path, ParsedInvoice, bool]]:
-    """Trả về [(stem, file nguồn, ParsedInvoice, có XML gốc)] cho hóa đơn mua vào."""
-    src = out_dir / "xml" / "purchase"
+def _collect(out_dir: Path, raw_index: dict[str, dict[str, Any]], direction: str = "purchase") -> list[tuple[str, Path, ParsedInvoice, bool]]:
+    """Trả về [(stem, file nguồn, ParsedInvoice, có XML gốc)] cho hóa đơn của một chiều."""
+    src = out_dir / "xml" / direction
     found: dict[str, tuple[str, Path, ParsedInvoice, bool]] = {}
     if not src.is_dir():
         return []
@@ -380,6 +491,7 @@ def export_misa(output_dir: str | Path, settings: MisaSettings | None = None) ->
 
     template_path = resolve_template(s.mau)
     _, allowed_vat = template_info(template_path)
+    mahang = MaHangMap(misa_dir / MAP_FILE)
 
     catalog = ItemCatalog()
     suppliers: dict[str, dict[str, Any]] = {}
@@ -390,13 +502,11 @@ def export_misa(output_dir: str | Path, settings: MisaSettings | None = None) ->
 
     for stem, path, inv, has_xml in invoices:
         raw = raw_index.get(stem, {})
-        try:
-            tthai = int(raw.get("tthai")) if raw.get("tthai") not in (None, "") else 0
-        except (TypeError, ValueError):
-            tthai = 0
+        tthai = _int(raw.get("tthai"))
         label = f"{inv.khmshdon}{inv.khhdon} số {inv.shdon} - {inv.nb_ten}"
-        if tthai in SKIP_TTHAI:
-            skipped.append({"hd": label, "mst": inv.nb_mst, "ly_do": SKIP_TTHAI[tthai], "file": path.name})
+        reason = skip_reason(raw)
+        if reason:
+            skipped.append({"hd": label, "mst": inv.nb_mst, "ly_do": reason, "file": path.name})
             continue
 
         ma_ncc = inv.nb_mst or _ascii_slug(inv.nb_ten)[:20] or "NCC"
@@ -455,14 +565,18 @@ def export_misa(output_dir: str | Path, settings: MisaSettings | None = None) ->
         sum_thue = 0.0
         if not lines:
             ts = inv.thue_theo_suat[0]["thue_suat"] if len(inv.thue_theo_suat) == 1 else ""
-            ma = catalog.code_for("", "Hàng hóa, dịch vụ theo hóa đơn", "", ts, s)
+            ma = catalog.code_for("", "Hàng hóa, dịch vụ theo hóa đơn", "", ts, s,
+                                  override=mahang.get("Mua vào", "Hàng hóa, dịch vụ theo hóa đơn", ""))
+            mahang.note("Mua vào", "Hàng hóa, dịch vụ theo hóa đơn", "", ma)
             add_line(ma, "Hàng hóa, dịch vụ theo hóa đơn", "", None, None, inv.tong_tien_chua_thue, None, None, ts, inv.tong_tien_thue)
             notes.append("Không có dòng hàng chi tiết; ghi 1 dòng theo tổng tiền hóa đơn")
             sum_tt += inv.tong_tien_chua_thue or 0
             sum_thue += inv.tong_tien_thue or 0
             res.lines += 1
         for ln in lines:
-            ma = catalog.code_for(ln.ma_hang, ln.ten_hang, ln.dvt, ln.thue_suat, s)
+            ma = catalog.code_for(ln.ma_hang, ln.ten_hang, ln.dvt, ln.thue_suat, s,
+                                  override=mahang.get("Mua vào", ln.ten_hang, ln.dvt))
+            mahang.note("Mua vào", ln.ten_hang, ln.dvt, ma)
             sign = -1 if ln.tchat == "3" else 1  # chiết khấu thương mại ghi giảm
             tt = None if ln.thanh_tien is None else sign * ln.thanh_tien
             thue = None if ln.tien_thue is None else sign * ln.tien_thue
@@ -496,6 +610,9 @@ def export_misa(output_dir: str | Path, settings: MisaSettings | None = None) ->
 
     res.excel_path = str(misa_dir / TEMPLATE_OUT_NAME)
     res.warnings = _fill_template(Path(res.excel_path), rows, template_path)
+    w = mahang.save()
+    if w:
+        res.warnings.append(w)
 
     wb = Workbook()
     ws = wb.active
@@ -505,7 +622,7 @@ def export_misa(output_dir: str | Path, settings: MisaSettings | None = None) ->
     _write(wb.create_sheet("DanhMuc_VatTuHangHoa"), ITEM_COLUMNS, list(catalog.by_key.values()))
     _write(wb.create_sheet("BoQua"), [("Hóa đơn", "hd", False), ("MST người bán", "mst", False), ("Lý do không đưa vào", "ly_do", False), ("File", "file", False)], skipped)
     guide = wb.create_sheet("HuongDan")
-    for line in HUONG_DAN.strip().splitlines():
+    for line in huong_dan().splitlines():
         guide.append([line])
     guide.column_dimensions["A"].width = 120
     res.catalog_path = str(misa_dir / "MISA_DanhMuc_va_KiemTra.xlsx")
@@ -518,7 +635,7 @@ def export_misa(output_dir: str | Path, settings: MisaSettings | None = None) ->
     res.suppliers = len(suppliers)
     res.items = len(catalog.by_key)
     res.warnings += [c["hd"] + ": " + c["ghi_chu"] for c in checks if "lệch" in c["ghi_chu"] or "mẫu MISA" in c["ghi_chu"]]
-    (misa_dir / "HUONG_DAN_NHAP_MISA.txt").write_text(HUONG_DAN.strip() + "\n", encoding="utf-8")
+    (misa_dir / "HUONG_DAN_NHAP_MISA.txt").write_text(huong_dan() + "\n", encoding="utf-8")
     log.info(
         "[MISA] %d chứng từ (%d dòng), %d XML, %d hóa đơn không có XML, %d bỏ qua; %d NCC, %d mã hàng -> %s",
         res.vouchers, res.lines, res.xml_files, res.no_xml, res.skipped, res.suppliers, res.items, res.excel_path,
@@ -584,3 +701,40 @@ LƯU Ý
 - Chiết khấu thương mại ghi âm; hàng khuyến mại giữ số liệu trên hóa đơn.
 - Không vừa nhập Excel vừa cho MISA đọc XML cho cùng một hóa đơn (sẽ trùng).
 """
+
+
+HUONG_DAN_BAN = r"""
+HƯỚNG DẪN NHẬP HÓA ĐƠN BÁN RA VÀO MISA SME
+==========================================
+
+Khi kéo hóa đơn BÁN RA (có tải XML), thư mục misa có thêm:
+- Ban_hang_VND.xlsx          : ĐÚNG MẪU nhập khẩu "Chứng từ bán hàng" (Bán hàng VND) của MISA. Mỗi dòng hàng một dòng;
+                               các dòng cùng "Số chứng từ" (BH + số hóa đơn, vd BH00012) là một chứng từ.
+- Danh_muc_khach_hang.xlsx   : ĐÚNG MẪU "Danh mục khách hàng" của MISA. Mã khách hàng = MST nếu khách là đơn vị có MST,
+                               ngược lại là tên không dấu viết liền (vd NGUYENVANAN); mỗi khách một mã, địa chỉ lấy theo
+                               hóa đơn gần nhất.
+- MISA_BanHang_KiemTra.xlsx  : KiemTra (đối chiếu tổng dòng hàng với tổng hóa đơn), DanhMuc_HangHoa, BoQua (hóa đơn bị hủy,
+                               bị thay thế, chưa được cấp mã... không đưa vào).
+
+MẶC ĐỊNH
+- Phương thức thanh toán = 1 (thu tiền mặt): TK Nợ 1111, TK Có (doanh thu) 5113, TK thuế GTGT 33311.
+  Đổi trong file .env: MISA_BAN_THANH_TOAN=0 (chưa thu tiền, TK Nợ 131) hoặc 2 (chuyển khoản, TK Nợ 1121);
+  MISA_TK_DOANH_THU (vd 5111 nếu bán hàng hóa), MISA_TK_THUE_DAU_RA, MISA_TK_PHAI_THU.
+- Thành tiền, thuế suất, tiền thuế lấy đúng như trên hóa đơn. Thuế suất không có trong ghi chú của mẫu (vd 8%) vẫn ghi
+  đúng nhưng được đánh dấu ở sheet KiemTra.
+
+MÃ HÀNG (file MaHang_MISA.xlsx, dùng chung cho mua vào và bán ra)
+   Lần đầu tool tự đặt mã từ tên hàng. Mở MaHang_MISA.xlsx, sửa cột "Mã hàng MISA" thành mã đang có trong MISA
+   (vd DV, DV1), lưu lại rồi bấm "Xuất sang MISA" lần nữa: các lần sau tool tự dùng mã đã sửa.
+
+CÁC BƯỚC
+1. Tệp > Nhập khẩu từ Excel > Danh mục Khách hàng: chọn Danh_muc_khach_hang.xlsx (chỉ cần với khách mới).
+2. Tệp > Nhập khẩu từ Excel > Chứng từ bán hàng (hoặc Bán hàng > mũi tên cạnh "Thêm chứng từ" > Nhập từ excel):
+   chọn Ban_hang_VND.xlsx. Mã hàng phải có trong danh mục Vật tư hàng hóa của MISA (thêm trước nếu chưa có).
+3. Bấm Thực hiện, xem kết quả kiểm tra, sửa dòng MISA báo lỗi rồi nhập lại.
+   Nếu MISA chỉ nhận .xls: mở file bằng Excel > Save As > Excel 97-2003 Workbook (.xls).
+"""
+
+
+def huong_dan() -> str:
+    return HUONG_DAN.strip() + "\n\n\n" + HUONG_DAN_BAN.strip()

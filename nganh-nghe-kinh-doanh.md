@@ -1,6 +1,6 @@
 # Danh sách ngành, nghề kinh doanh
 
-Điều 3 trong Điều lệ Công ty TNHH Thương mại và Dịch vụ XNK FTG, chép lại từ ảnh chụp các trang 1–6.
+Điều 3 trong Điều lệ Công ty TNHH Thương mại và Dịch vụ XNK FTG, chép lại từ ảnh chụp các trang 1–7.
 
 | STT | Mã ngành | Tên ngành |
 |---|---|---|
@@ -67,12 +67,15 @@
 | 61 | 4922 | Vận tải hành khách bằng xe buýt giữa nội thành và ngoại thành, liên tỉnh |
 | 62 | 4929 | Vận tải hành khách bằng xe buýt loại khác |
 | 63 | 4931 | Vận tải hành khách đường bộ trong nội thành, ngoại thành (trừ vận tải bằng xe buýt)<br>Chi tiết: Kinh doanh vận tải hành khách bằng xe ô tô (Điều 66 Luật giao thông đường bộ năm 2008) |
-| 64 | 4932 | Vận tải hành khách đường bộ khác<br>Chi tiết:<br>- Kinh doanh vận tải hành khách bằng xe ô tô theo tuyến cố định;<br>- Kinh doanh vận tải hành khách bằng xe taxi;<br>- Kinh doanh vận tải hành khách theo hợp đồng;<br>*(tiếp ở trang 7)* |
+| 64 | 4932 | Vận tải hành khách đường bộ khác<br>Chi tiết:<br>- Kinh doanh vận tải hành khách bằng xe ô tô theo tuyến cố định;<br>- Kinh doanh vận tải hành khách bằng xe taxi;<br>- Kinh doanh vận tải hành khách theo hợp đồng;<br>- Kinh doanh vận tải khách du lịch bằng xe ô tô<br>(Điều 4,6,7 Nghị định 158/2024/NĐ-CP Quy Định Về Hoạt Động Vận Tải Đường Bộ) |
+| 65 | 4933 | Vận tải hàng hóa bằng đường bộ<br>Chi tiết: Kinh doanh vận tải hàng hóa bằng xe ô tô<br>(Điều 8 Nghị định 158/2024/NĐ-CP Quy Định Về Hoạt Động Vận Tải Đường Bộ) |
+| 66 | 5021 | Vận tải hành khách đường thủy nội địa |
+| 67 | 5022 | Vận tải hàng hóa đường thủy nội địa |
+| 68 | 7020 | Hoạt động tư vấn quản lý<br>(Trừ hoạt động tư vấn kế toán, pháp luật, tài chính) |
 
 ## Ghi chú khi rà soát
 
 1. **Ngành 48 (mã 4781) bị chép nhầm tên.** Văn bản ghi giống hệt ngành 47 (4774). Theo Hệ thống ngành kinh tế Việt Nam (VSIC 2018), mã 4781 là: *"Bán lẻ lương thực, thực phẩm, đồ uống, thuốc lá, thuốc lào lưu động hoặc tại chợ"*. Nên sửa trước khi nộp.
 2. **Căn cứ pháp luật có thể đã cũ** (nên kiểm tra lại với cơ quan đăng ký):
-   - Ngành 63: "Luật giao thông đường bộ năm 2008" đã được thay bằng Luật Đường bộ 2024 (hiệu lực từ 01/01/2025).
+   - Ngành 63: còn dẫn "Luật giao thông đường bộ năm 2008", luật này đã được thay bằng Luật Đường bộ 2024 (hiệu lực từ 01/01/2025). Ngành 64, 65 đã dẫn Nghị định 158/2024/NĐ-CP, nên ngành 63 có thể sửa theo cho thống nhất.
    - Ngành 17, 45: Luật Dược 2016 đã được sửa đổi năm 2024.
-3. Chưa có trang 7 (phần còn lại của ngành 64 và các ngành sau).

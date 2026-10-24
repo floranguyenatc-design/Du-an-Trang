@@ -71,6 +71,7 @@ class Settings:
     misa_tk_doanh_thu: str = "5113"
     misa_tk_thue_dau_ra: str = "33311"
     misa_tk_phai_thu: str = "131"
+    bang_ke_ky: str = "quy"
 
     @classmethod
     def from_env(cls, env_file: str = ".env") -> "Settings":
@@ -101,6 +102,7 @@ class Settings:
             misa_tk_doanh_thu=g("MISA_TK_DOANH_THU", "5113") or "5113",
             misa_tk_thue_dau_ra=g("MISA_TK_THUE_DAU_RA", "33311") or "33311",
             misa_tk_phai_thu=g("MISA_TK_PHAI_THU", "131") or "131",
+            bang_ke_ky=g("BANG_KE_KY", "quy") or "quy",
         )
 
     def misa_settings(self):

@@ -160,6 +160,8 @@ def cmd_pull(args: argparse.Namespace, settings: Settings) -> int:
         redownload=args.tai_lai,
         make_pdf=not args.khong_pdf,
         export_misa=args.misa,
+        bang_ke=args.bang_ke,
+        bang_ke_ky=args.ky or settings.bang_ke_ky,
         misa_settings=settings.misa_settings(),
         workers=args.luong or settings.xml_workers,
         page_size=settings.page_size,
@@ -173,7 +175,26 @@ def cmd_pull(args: argparse.Namespace, settings: Settings) -> int:
         print(f"PDF   : {res.pdf_dir} ({res.pdfs} file)")
     if res.misa_folder:
         print(f"MISA  : {res.misa_folder} ({res.misa_summary or '0 chứng từ'})" + (f" LỖI: {res.misa_error}" if res.misa_error else ""))
+    if res.bang_ke_folder or res.bang_ke_error:
+        print(f"Bảng kê giảm thuế: {res.bang_ke_folder} ({res.bang_ke_summary})" + (f" LỖI: {res.bang_ke_error}" if res.bang_ke_error else ""))
     return 0 if not res.errors else 2
+
+
+def cmd_bang_ke(args: argparse.Namespace, settings: Settings) -> int:
+    from .bangke import export_bang_ke
+
+    res = export_bang_ke(args.thu_muc or settings.output_dir, args.ky or settings.bang_ke_ky)
+    if not res.files:
+        print("Không có hóa đơn thuế suất 8% (hợp lệ) trong các hóa đơn đã kéo: không lập bảng kê.")
+        return 0
+    print(f"Đã lập {len(res.files)} bảng kê giảm thuế GTGT (mẫu 01, NQ142) trong {res.folder}:")
+    for p in res.periods:
+        print(f"  {p['ky']:<13} {p['file']}: mua vào {p['n_mua']} dòng, {p['gt_mua']:,} đ; "
+              f"bán ra {p['n_ban']} dòng, {p['gt_ban']:,} đ, thuế được giảm {p['giam']:,} đ")
+    print(f"  Đối chiếu từng hóa đơn: {res.detail_path}")
+    for w in res.warnings:
+        print(f"  ! {w}")
+    return 0
 
 
 def cmd_misa(args: argparse.Namespace, settings: Settings) -> int:
@@ -287,6 +308,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--tai-lai", action="store_true", help="Tải lại XML (và tạo lại PDF) dù đã có file")
     s.add_argument("--khong-pdf", action="store_true", help="Không tạo file PDF cho từng hóa đơn")
     s.add_argument("--misa", action="store_true", help="Kéo xong thì tạo luôn thư mục misa (file nhập khẩu MISA SME)")
+    s.add_argument("--bang-ke", action="store_true", help="Kéo xong thì lập bảng kê 01 giảm thuế GTGT 8%% (NQ142)")
+    s.add_argument("--ky", choices=["quy", "thang"], help="Bảng kê theo quý hoặc tháng (mặc định BANG_KE_KY=quy)")
     s.add_argument("--luong", type=int, help="Số luồng tải XML song song (1-10, mặc định XML_WORKERS=3)")
     s.set_defaults(func=cmd_pull)
 
@@ -298,6 +321,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--thu-muc", help="Thư mục kết quả đã kéo (mặc định OUTPUT_DIR hoặc ./output)")
     s.add_argument("--chieu", choices=list(DIRECTION_CHOICES), help="Chỉ xuất một chiều (mặc định: chiều nào đã kéo thì xuất)")
     s.set_defaults(func=cmd_misa)
+
+    s = sub.add_parser("bang-ke", parents=[common], help="Lập bảng kê 01 giảm thuế GTGT 8%% (NQ142, mẫu HTKK) từ hóa đơn đã kéo")
+    s.add_argument("--thu-muc", help="Thư mục kết quả đã kéo (mặc định OUTPUT_DIR hoặc ./output)")
+    s.add_argument("--ky", choices=["quy", "thang"], help="Lập theo quý hoặc tháng (mặc định BANG_KE_KY=quy)")
+    s.set_defaults(func=cmd_bang_ke)
 
     s = sub.add_parser("parse-xml", parents=[common], help="Đọc thư mục XML có sẵn và xuất Excel (offline)")
     s.add_argument("thu_muc_xml", help="Thư mục chứa file .xml")

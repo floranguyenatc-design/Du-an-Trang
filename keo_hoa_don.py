@@ -28,7 +28,7 @@ ERROR_FILE = HERE / "loi_giao_dien.txt"
 def ensure_dependencies() -> str:
     """Cài requests/openpyxl nếu máy chưa có. Trả về thông báo (rỗng nếu không làm gì)."""
     missing = []
-    for mod in ("requests", "openpyxl", "reportlab"):
+    for mod in ("requests", "openpyxl", "reportlab", "xlrd", "xlwt", "xlutils"):
         try:
             __import__(mod)
         except ImportError:
@@ -119,6 +119,8 @@ def build_options(form: dict):
         redownload=bool(form.get("redownload", False)),
         make_pdf=bool(form.get("make_pdf", True)),
         export_misa=bool(form.get("export_misa", False)),
+        bang_ke=bool(form.get("bang_ke", False)),
+        bang_ke_ky=form.get("bang_ke_ky") or "quy",
         workers=int(form.get("workers") or 3),
     )
 
@@ -217,6 +219,8 @@ def run_gui() -> None:
     v_redo = tk.BooleanVar(value=False)
     v_pdf = tk.BooleanVar(value=True)
     v_misa = tk.BooleanVar(value=True)
+    v_bk = tk.BooleanVar(value=True)
+    v_bk_ky = tk.StringVar(value="Quý" if (env.get("BANG_KE_KY", "quy") or "quy").lower().startswith("q") else "Tháng")
     v_remember = tk.BooleanVar(value=True)
     opt_frame = ttk.Frame(frm)
     opt_frame.grid(row=4, column=1, columnspan=4, sticky="w", **pad)
@@ -230,6 +234,10 @@ def run_gui() -> None:
     ttk.Checkbutton(line2, text="Tạo file nhập MISA", variable=v_misa).pack(side="left", padx=4)
     ttk.Checkbutton(line2, text="Tải lại XML đã có", variable=v_redo).pack(side="left", padx=4)
     ttk.Checkbutton(line2, text="Ghi nhớ mật khẩu", variable=v_remember).pack(side="left", padx=4)
+    line3 = ttk.Frame(opt_frame)
+    line3.pack(anchor="w", pady=(2, 0))
+    ttk.Checkbutton(line3, text="Lập bảng kê giảm thuế GTGT 8% (NQ142) theo", variable=v_bk).pack(side="left", padx=(4, 2))
+    ttk.Combobox(line3, textvariable=v_bk_ky, values=("Quý", "Tháng"), width=7, state="readonly").pack(side="left")
 
     # --- thư mục kết quả
     ttk.Label(frm, text="Thư mục kết quả:").grid(row=5, column=0, sticky="e", **pad)
@@ -252,7 +260,8 @@ def run_gui() -> None:
     b_open = ttk.Button(btns, text="Mở thư mục kết quả")
     b_excel = ttk.Button(btns, text="Mở file Excel", state="disabled")
     b_misa = ttk.Button(btns, text="Xuất sang MISA")
-    for b in (b_login, b_start, b_stop, b_open, b_excel, b_misa):
+    b_bk = ttk.Button(btns, text="Bảng kê giảm thuế")
+    for b in (b_login, b_start, b_stop, b_open, b_excel, b_misa, b_bk):
         b.pack(side="left", padx=4)
 
     prog = ttk.Progressbar(frm, mode="determinate")
@@ -320,12 +329,15 @@ def run_gui() -> None:
             "redownload": v_redo.get(),
             "make_pdf": v_pdf.get() and v_xml.get(),
             "export_misa": v_misa.get() and v_xml.get(),
+            "bang_ke": v_bk.get() and v_xml.get(),
+            "bang_ke_ky": "thang" if v_bk_ky.get() == "Tháng" else "quy",
             "output_dir": v_out.get(),
             "workers": 3,
         }
 
     def persist() -> None:
-        updates = {"GDT_USERNAME": v_user.get().strip(), "OUTPUT_DIR": v_out.get().strip() or "output"}
+        updates = {"GDT_USERNAME": v_user.get().strip(), "OUTPUT_DIR": v_out.get().strip() or "output",
+                   "BANG_KE_KY": "thang" if v_bk_ky.get() == "Tháng" else "quy"}
         if v_remember.get():
             updates["GDT_PASSWORD"] = v_pass.get()
         try:
@@ -334,7 +346,7 @@ def run_gui() -> None:
             append(f"Không lưu được .env: {exc}")
 
     def set_busy(busy: bool, stoppable: bool = True) -> None:
-        for b in (b_login, b_start, b_misa):
+        for b in (b_login, b_start, b_misa, b_bk):
             b.config(state="disabled" if busy else "normal")
         b_stop.config(state="normal" if busy and stoppable else "disabled")
 
@@ -423,6 +435,8 @@ def run_gui() -> None:
                         if res.misa_folder and not res.misa_error else ""
                     )
                     + (f"\n\nKHÔNG tạo được file MISA: {res.misa_error}\nXem file LOI_XUAT_MISA.txt trong thư mục misa." if res.misa_error else "")
+                    + (f"\nBảng kê giảm thuế 8%: {res.bang_ke_folder} ({res.bang_ke_summary})" if res.bang_ke_files else "")
+                    + (f"\n\nKHÔNG lập được bảng kê giảm thuế: {res.bang_ke_error}" if res.bang_ke_error else "")
                 )
                 def finish() -> None:
                     v_status.set(msg.splitlines()[0])
@@ -497,6 +511,48 @@ def run_gui() -> None:
 
         threading.Thread(target=worker, daemon=True).start()
 
+    def do_bang_ke() -> None:
+        from hddt.bangke import export_bang_ke
+
+        out_dir = v_out.get().strip() or "output"
+        ky = "thang" if v_bk_ky.get() == "Tháng" else "quy"
+        set_busy(True, stoppable=False)
+        v_status.set("Đang lập bảng kê giảm thuế GTGT...")
+        append("=" * 70)
+
+        def worker() -> None:
+            try:
+                res = export_bang_ke(out_dir, ky)
+                if not res.files:
+                    ui(lambda: (v_status.set("Không có hóa đơn thuế suất 8%: không lập bảng kê."),
+                                messagebox.showinfo("Bảng kê giảm thuế", "Trong các hóa đơn đã kéo không có hóa đơn hợp lệ nào thuế suất 8%.\nKhông cần lập bảng kê giảm thuế.")))
+                    return
+                lines = [
+                    f"• {p['ky']}: {p['file']}\n   mua vào {p['n_mua']} dòng ({p['gt_mua']:,} đ, thuế {p['thue_mua']:,} đ); "
+                    f"bán ra {p['n_ban']} dòng ({p['gt_ban']:,} đ, thuế được giảm {p['giam']:,} đ)"
+                    for p in res.periods
+                ]
+                msg = (
+                    f"Đã lập {len(res.files)} bảng kê 01 giảm thuế GTGT (đúng mẫu HTKK):\n\n" + "\n".join(lines)
+                    + "\n\nĐối chiếu từng hóa đơn: BangKe01_ChiTiet.xlsx (cùng thư mục)."
+                    + ("\n\nCần xem lại:\n" + "\n".join("• " + w for w in res.warnings[:10]) if res.warnings else "")
+                    + "\n\nHTKK: mở tờ khai 01/GTGT > phụ lục giảm thuế > Tải bảng kê, chọn file của đúng kỳ."
+                )
+
+                def finish() -> None:
+                    v_status.set(f"Đã lập {len(res.files)} bảng kê giảm thuế: {res.folder}")
+                    messagebox.showinfo("Bảng kê giảm thuế", msg)
+                    open_path(str(Path(res.folder).resolve()))
+                ui(finish)
+            except Exception as exc:  # noqa: BLE001
+                m = str(exc) or type(exc).__name__
+                logger.error("Lỗi lập bảng kê: %s", m)
+                ui(lambda m=m: (v_status.set(f"Lỗi: {m}"), messagebox.showerror("Lỗi lập bảng kê", m)))
+            finally:
+                ui(lambda: set_busy(False))
+
+        threading.Thread(target=worker, daemon=True).start()
+
     def do_stop() -> None:
         state["stop"].set()
         v_status.set("Đang dừng... (chờ request hiện tại kết thúc, kết quả đã tải vẫn được ghi ra Excel)")
@@ -525,6 +581,7 @@ def run_gui() -> None:
     b_open.config(command=do_open_dir)
     b_excel.config(command=lambda: open_path(state["excel"]))
     b_misa.config(command=do_misa)
+    b_bk.config(command=do_bang_ke)
 
     def on_close() -> None:
         if state["thread"] and state["thread"].is_alive():

@@ -18,6 +18,7 @@ Thuế dùng, tự đọc CAPTCHA SVG, phân trang theo `state`, tải XML qua `
 6. Muốn đưa vào **MISA SME**: bấm **Xuất sang MISA**. Tool tạo thư mục `misa` trong thư mục kết quả, gồm `Mua_hang_khong_qua_kho_VND.xlsx` (điền đúng mẫu nhập khẩu "Chứng từ mua hàng không qua kho" của MISA SME 2020 R3, 38 cột; tool ghi theo tên cột nên khớp cả mẫu 39 cột khi đặt `MISA_MAU=moi`), `MISA_DanhMuc_va_KiemTra.xlsx` (danh mục nhà cung cấp, vật tư hàng hóa, bảng đối chiếu), `xml_mua_vao` và `HUONG_DAN_NHAP_MISA.txt`. Tài khoản mặc định: TK chi phí 642, TK thuế 1331; TK công nợ/TK tiền **1111** (tiền mặt) cho hóa đơn mua hàng và **1121** (ủy nhiệm chi) cho hóa đơn của ngân hàng, tool tự nhận ra người bán là ngân hàng. Đổi trong `.env` (`MISA_TK_CHI_PHI`, `MISA_TK_THUE`, `MISA_NHOM_HHDV`, `MISA_THANH_TOAN`, `MISA_TK_TIEN_MAT`, `MISA_TK_NGAN_HANG`, `MISA_MAU`).
    - **Bán ra**: nếu đã kéo hóa đơn bán ra, thư mục `misa` có thêm `Ban_hang_VND.xlsx` (điền đúng mẫu nhập khẩu "Chứng từ bán hàng" – Bán hàng VND của MISA), `Danh_muc_khach_hang.xlsx` (đúng mẫu "Danh mục KH"; mã khách = MST nếu có, không thì tên không dấu viết liền, vd `NGUYENVANAN`) và `MISA_BanHang_KiemTra.xlsx`. Mặc định thu tiền mặt: TK Nợ 1111, TK doanh thu 5113, TK thuế 33311; số chứng từ `BH` + số hóa đơn (vd `BH00012`); thành tiền, thuế suất, tiền thuế lấy đúng như trên hóa đơn. Hóa đơn bị hủy, bị thay thế, bị CQT từ chối hoặc chưa được cấp mã không đưa vào (sheet BoQua). Đổi trong `.env`: `MISA_BAN_THANH_TOAN` (0 chưa thu – TK 131, 1 tiền mặt, 2 chuyển khoản – TK 1121), `MISA_TK_DOANH_THU`, `MISA_TK_THUE_DAU_RA`, `MISA_TK_PHAI_THU`.
    - **Mã hàng**: file `misa/MaHang_MISA.xlsx` liệt kê mọi mặt hàng (mua vào và bán ra) với mã tool tự đặt. Sửa cột "Mã hàng MISA" thành mã đang dùng trong MISA (vd `DV`, `DV1`) một lần; các lần xuất sau tool tự dùng lại.
+7. **Bảng kê giảm thuế GTGT 8% (NQ142)**: để tích ô "Lập bảng kê giảm thuế GTGT 8%" (chọn theo Quý hoặc Tháng) khi kéo, hoặc bấm nút **Bảng kê giảm thuế** với hóa đơn đã kéo. Tool điền đúng file mẫu `Bang_Ke_01_GiamThue_GTGT_NQ142_GTGT_TT80.xls` của HTKK vào thư mục `bang_ke_giam_thue`, mỗi kỳ một file (vd `BangKe01_GiamThue_Quy1_2025.xls`): phần I là hàng mua vào thuế suất 8% (giá trị chưa thuế, thuế GTGT), phần II là hàng bán ra thuế suất 8% (thuế suất theo quy định 10, sau giảm 8, thuế được giảm = giá trị x 2%). Dòng cùng tên hàng được cộng gộp; hóa đơn bị hủy, bị thay thế, bị từ chối hoặc chưa cấp mã không đưa vào. `BangKe01_ChiTiet.xlsx` liệt kê từng hóa đơn đã cộng để đối chiếu. Tải lên HTKK ở phụ lục giảm thuế của tờ khai 01/GTGT.
 
 Muốn chạy bằng dòng lệnh thì dùng `cai_dat.bat`, `dang_nhap.bat`, `keo_hoa_don.bat` hoặc các lệnh bên dưới.
 
@@ -64,6 +65,9 @@ python -m hddt excel-gdt --thang 12/2025 --chieu mua
 
 # Chuẩn bị file nhập khẩu MISA SME từ hóa đơn mua vào / bán ra đã kéo (thêm --chieu ban để chỉ xuất bán ra)
 python -m hddt misa --thu-muc output
+
+# Lập bảng kê 01 giảm thuế GTGT 8% (NQ142) theo quý (--ky thang để lập theo tháng)
+python -m hddt bang-ke --thu-muc output
 
 # Đọc lại thư mục XML đã tải (offline) ra Excel
 python -m hddt parse-xml output/xml --excel output/HoaDon_Local.xlsx

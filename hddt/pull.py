@@ -40,6 +40,9 @@ class PullOptions:
     # Sau khi kéo xong, tạo luôn thư mục misa (file nhập khẩu MISA SME) từ hóa đơn mua vào.
     export_misa: bool = False
     misa_settings: Any = None
+    # Lập "Bảng kê 01 - Giảm thuế GTGT" (NQ142) theo quý hoặc tháng (bang_ke_ky = "quy" | "thang").
+    bang_ke: bool = False
+    bang_ke_ky: str = "quy"
     workers: int = 3
     page_size: int = 50
 
@@ -58,6 +61,10 @@ class PullResult:
     misa_vouchers: int = 0
     misa_error: str = ""
     misa_summary: str = ""
+    bang_ke_folder: str = ""
+    bang_ke_files: list = field(default_factory=list)
+    bang_ke_summary: str = ""
+    bang_ke_error: str = ""
 
 
 def _err(direction: str, family: str, ref: InvoiceRef | None, step: str, message: str) -> dict[str, Any]:
@@ -295,4 +302,16 @@ def run_pull(
             result.misa_error = str(exc) or type(exc).__name__
             result.misa_folder = write_misa_error(out_dir, exc)
             log.error("[MISA] Không tạo được file nhập MISA: %s", result.misa_error)
+
+    if opts.bang_ke and not result.stopped:
+        from .bangke import export_bang_ke
+
+        try:
+            bres = export_bang_ke(out_dir, opts.bang_ke_ky)
+            result.bang_ke_folder = bres.folder
+            result.bang_ke_files = bres.files
+            result.bang_ke_summary = bres.summary()
+        except Exception as exc:  # noqa: BLE001
+            result.bang_ke_error = str(exc) or type(exc).__name__
+            log.error("[Bảng kê giảm thuế] Không lập được bảng kê: %s", result.bang_ke_error)
     return result

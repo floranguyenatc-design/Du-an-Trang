@@ -207,3 +207,12 @@ def test_pull_sold_with_misa_creates_sales_files(tmp_path, monkeypatch):
     for f in ("Mua_hang_khong_qua_kho_VND.xlsx", "Ban_hang_VND.xlsx", "Danh_muc_khach_hang.xlsx", "MISA_BanHang_KiemTra.xlsx", "MaHang_MISA.xlsx"):
         assert (m / f).is_file(), f
     assert not (m / "LOI_XUAT_MISA.txt").exists()
+
+
+def test_pull_with_bang_ke(tmp_path, monkeypatch, capsys):
+    fake = FakeGdt()
+    out = tmp_path / "out"
+    code = _run(["--env", "x", "pull", "--thang", "12/2025", "--chieu", "ca-hai", "--thu-muc", str(out), "--bang-ke", "--khong-pdf"], fake, monkeypatch)
+    assert code == 0
+    text = capsys.readouterr().out
+    assert "Bảng kê giảm thuế" in text and "LỖI" not in text  # dữ liệu giả lập không có thuế suất 8%

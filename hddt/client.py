@@ -83,11 +83,19 @@ class StopRequested(HddtError):
     """Người dùng yêu cầu dừng."""
 
 
+# Cổng thuế quá tải / không phản hồi kịp: thử lại sau hoặc tra khoảng ngày ngắn hơn thường được.
+GATEWAY_ERRORS = (502, 503, 504)
+# Khi tra danh sách bị quá tải, chia đôi khoảng ngày tối đa bấy nhiêu lần (tháng -> ~8 ngày).
+MAX_SPLIT_DEPTH = 2
+
+
 class ApiError(HddtError):
-    def __init__(self, message: str, status: int | None = None, body: str = ""):
+    def __init__(self, message: str, status: int | None = None, body: str = "", transient: bool = False):
         super().__init__(message)
         self.status = status
         self.body = body
+        # Lỗi do cổng thuế quá tải/hết thời gian chờ (không phải do yêu cầu sai).
+        self.transient = transient or status in GATEWAY_ERRORS
 
 
 @dataclass
@@ -269,7 +277,7 @@ class GdtClient:
                 resp = self.session.request(method, url, headers=headers, json=json_body, timeout=self.timeout)
             except requests.RequestException as exc:
                 if attempt > max_retries:
-                    raise ApiError(f"Lỗi mạng khi gọi {url}: {exc}") from exc
+                    raise ApiError(f"Lỗi mạng khi gọi {url}: {exc}", transient=isinstance(exc, requests.Timeout)) from exc
                 wait = min(2.0 * attempt, 10.0)
                 log.warning("Lỗi mạng (%s), thử lại sau %.0fs (%d/%d)", exc, wait, attempt, max_retries)
                 self._sleep(wait)
@@ -292,11 +300,17 @@ class GdtClient:
                 continue
 
             if resp.status_code >= 500 and retry_5xx and attempt <= max_retries:
-                wait = min(3.0 * attempt, 15.0)
+                # 502/503/504: cổng thuế quá tải, chờ lâu hơn rồi mới thử lại.
+                wait = min(10.0 * attempt, 30.0) if resp.status_code in GATEWAY_ERRORS else min(3.0 * attempt, 15.0)
                 log.warning("GDT trả HTTP %s; thử lại sau %.0fs (%d/%d)", resp.status_code, wait, attempt, max_retries)
                 self._sleep(wait)
                 continue
 
+            if resp.status_code in GATEWAY_ERRORS:
+                raise ApiError(
+                    f"Cổng thuế quá tải, không phản hồi kịp (HTTP {resp.status_code}) khi gọi {url}",
+                    resp.status_code, resp.text[:500],
+                )
             if resp.status_code >= 400:
                 detail = _extract_message(resp.text[:500])
                 detail = f" - {detail[:200]}" if detail else ""
@@ -406,17 +420,18 @@ class GdtClient:
                 plans = list(defaults)
             else:
                 plans = [None]
+            seen: set[tuple[str, str, str, str]] = set()
             for m_start, m_end in month_ranges(start, end):
                 try:
                     try:
-                        yield from self._iter_period(direction, family, m_start, m_end, plans, extra_search, page_size, on_page)
+                        yield from self._iter_range(direction, family, m_start, m_end, plans, extra_search, page_size, on_page, seen, 0, on_error)
                     except ApiError as exc:
                         if plans == [None] and exc.status in (400, 500):
                             log.warning(
                                 "[DANH SÁCH] %s/%s kỳ %s-%s: GDT từ chối tra cứu không lọc (HTTP %s); tách theo kết quả kiểm tra %s.",
                                 direction, family, f"{m_start:%d/%m/%Y}", f"{m_end:%d/%m/%Y}", exc.status, list(defaults),
                             )
-                            yield from self._iter_period(direction, family, m_start, m_end, list(defaults), extra_search, page_size, on_page)
+                            yield from self._iter_range(direction, family, m_start, m_end, list(defaults), extra_search, page_size, on_page, seen, 0, on_error)
                         else:
                             raise
                 except StopRequested:
@@ -428,6 +443,49 @@ class GdtClient:
                     else:
                         raise
 
+    def _iter_range(
+        self,
+        direction: str,
+        family: str,
+        start: date,
+        end: date,
+        plans: list[int | None],
+        extra_search: str,
+        page_size: int,
+        on_page: Callable[[str, str, date, date, int, int], None] | None,
+        seen: set[tuple[str, str, str, str]],
+        depth: int = 0,
+        on_error: Callable[[str, str, date, date, Exception], None] | None = None,
+    ) -> Iterator[InvoiceRef]:
+        """Như _iter_period, nhưng nếu cổng thuế quá tải (502/503/504, hết thời gian chờ) thì
+        chia đôi khoảng ngày và tra từng nửa. ``seen`` loại hóa đơn đã trả ở lần thử trước."""
+        try:
+            # Đoạn đã chia nhỏ không thử lại nữa (chia tiếp luôn) để không chờ quá lâu khi cổng thuế sập.
+            for ref in self._iter_period(direction, family, start, end, plans, extra_search, page_size, on_page, retries=1 if depth == 0 else 0):
+                key = (ref.nbmst, ref.khmshdon, ref.khhdon, ref.shdon)
+                if key in seen:
+                    continue
+                seen.add(key)
+                yield ref
+        except ApiError as exc:
+            if not exc.transient:
+                raise
+            if depth >= MAX_SPLIT_DEPTH or start >= end:
+                if depth == 0 or on_error is None:
+                    raise
+                # Đoạn nhỏ nhất vẫn lỗi: chỉ báo đoạn này, các đoạn khác vẫn tra tiếp.
+                log.error("[DANH SÁCH] %s/%s kỳ %s-%s thất bại: %s", direction, family, f"{start:%d/%m/%Y}", f"{end:%d/%m/%Y}", exc)
+                on_error(direction, family, start, end, exc)
+                return
+            mid = start + (end - start) // 2
+            log.warning(
+                "[DANH SÁCH] %s/%s kỳ %s-%s: cổng thuế quá tải (%s); chia nhỏ thành %s-%s và %s-%s để tra lại.",
+                direction, family, f"{start:%d/%m/%Y}", f"{end:%d/%m/%Y}", f"HTTP {exc.status}" if exc.status else "hết thời gian chờ",
+                f"{start:%d/%m}", f"{mid:%d/%m}", f"{mid + timedelta(days=1):%d/%m}", f"{end:%d/%m/%Y}",
+            )
+            for a, b in ((start, mid), (mid + timedelta(days=1), end)):
+                yield from self._iter_range(direction, family, a, b, plans, extra_search, page_size, on_page, seen, depth + 1, on_error)
+
     def _iter_period(
         self,
         direction: str,
@@ -438,6 +496,7 @@ class GdtClient:
         extra_search: str,
         page_size: int,
         on_page: Callable[[str, str, date, date, int, int], None] | None,
+        retries: int = 1,
     ) -> Iterator[InvoiceRef]:
         total_in_period = 0
         pages = 0
@@ -456,7 +515,7 @@ class GdtClient:
                 )
                 if state:
                     url += "&state=" + quote(state)
-                payload = self._request("GET", url, action="Tìm kiếm", max_retries=1).json()
+                payload = self._request("GET", url, action="Tìm kiếm", max_retries=retries).json()
                 datas = payload.get("datas")
                 if datas is None:
                     raise ApiError("Phản hồi danh sách không có trường 'datas'.", body=str(payload)[:300])

@@ -248,3 +248,51 @@ def test_month_ranges_and_search():
     rs = list(month_ranges(date(2025, 11, 15), date(2026, 1, 10)))
     assert rs == [(date(2025, 11, 15), date(2025, 11, 30)), (date(2025, 12, 1), date(2025, 12, 31)), (date(2026, 1, 1), date(2026, 1, 10))]
     assert build_search(date(2025, 12, 1), date(2025, 12, 31), 8) == "tdlap=ge=01/12/2025T00:00:00;tdlap=le=31/12/2025T23:59:59;ttxly==8"
+
+
+def _gateway_client(fake, fail_if):
+    """Client mà danh sách bán ra trả 504 khi fail_if(từ ngày, đến ngày) đúng."""
+    calls = []
+
+    def request(method, url, **kw):
+        if "/invoices/sold" in url:
+            search = parse_qs(urlparse(url).query)["search"][0]
+            a, b = search.split(";")[0][9:19], search.split(";")[1][9:19]
+            calls.append((a, b))
+            if fail_if(a, b):
+                return FakeResponse(504, b"<html><body><h1>504 Gateway Time-out</h1></body></html>")
+            # server giả chỉ hiểu cả tháng 12: đổi khoảng ngày nhỏ về cả tháng (mỗi nửa trả lại cùng hóa đơn)
+            url = url.replace(f"tdlap%3Dge%3D{a}", "tdlap%3Dge%3D01/12/2025").replace(f"tdlap%3Dle%3D{b}", "tdlap%3Dle%3D31/12/2025")
+        return fake.request(method, url, **kw)
+
+    session = mock.Mock(spec=requests.Session)
+    session.request.side_effect = request
+    session.proxies = {}
+    return GdtClient("0109876543", "secret", session=session, request_interval=0, sleep=lambda s: None), calls
+
+
+def test_gateway_timeout_splits_period(fake):
+    client, calls = _gateway_client(fake, lambda a, b: (a, b) == ("01/12/2025", "31/12/2025"))
+    refs = client.list_invoices("sold", date(2025, 12, 1), date(2025, 12, 31), families=["query"])
+    keys = [(r.khhdon, r.shdon) for r in refs]
+    assert keys and len(keys) == len(set(keys))  # chia đôi kỳ, không trùng hóa đơn
+    assert ("01/12/2025", "16/12/2025") in calls and ("17/12/2025", "31/12/2025") in calls
+
+
+def test_gateway_timeout_persistent_is_reported(fake):
+    client, calls = _gateway_client(fake, lambda a, b: True)
+    errors = []
+    refs = list(client.iter_invoices("sold", date(2025, 12, 1), date(2025, 12, 31), families=["query"],
+                                     on_error=lambda d, f, s, e, exc: errors.append(str(exc))))
+    # báo riêng từng đoạn ~8 ngày không tra được
+    assert refs == [] and len(errors) == 4 and all("quá tải" in e for e in errors)
+    assert len(calls) == 8  # 2 lần cả tháng + 2 nửa + 4 phần tư: có giới hạn, không treo mãi
+
+
+def test_gateway_timeout_only_one_piece_fails(fake):
+    client, calls = _gateway_client(fake, lambda a, b: a in ("01/12/2025", "09/12/2025") or (a, b) == ("01/12/2025", "31/12/2025"))
+    errors = []
+    refs = list(client.iter_invoices("sold", date(2025, 12, 1), date(2025, 12, 31), families=["query"],
+                                     on_error=lambda d, f, s, e, exc: errors.append((s, e))))
+    assert refs  # các đoạn còn lại vẫn lấy được
+    assert errors == [(date(2025, 12, 1), date(2025, 12, 8)), (date(2025, 12, 9), date(2025, 12, 16))]
